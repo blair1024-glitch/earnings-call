@@ -83,6 +83,19 @@ def _pick(row: dict, keys: tuple[str, ...]) -> str:
     return ""
 
 
+def _pick_prefix(row: dict, prefix: str) -> str:
+    """用開頭比對取值。
+
+    營益分析表的欄位名把算式也寫進去了，上市是
+    「毛利率(%)(營業毛利)/(營業收入)」、上櫃只寫「毛利率」，
+    寫死全名很脆弱，比開頭就好。
+    """
+    for k, v in row.items():
+        if k.startswith(prefix) and v not in (None, ""):
+            return str(v).strip()
+    return ""
+
+
 def _num(text: str) -> float | None:
     """把 "1,234,567" 這種字串轉成數字；轉不動回 None（不要當成 0）。"""
     if not text:
@@ -111,6 +124,49 @@ def _period(year: str, season: str) -> str:
     if not 1 <= s <= 4:
         return ""
     return f"{y}Q{s}"
+
+
+def fetch_ratios(s) -> dict[str, dict]:
+    """從「營益分析查詢彙總表」直接取三率（已經是算好的百分比）。
+
+    這是主要來源：它是全體公司彙總，不像綜合損益表被拆成六個產業分類。
+    回傳 {代號: {period, gm, opm, npm}}。
+    """
+    out: dict[str, dict] = {}
+    for url in RATIO_CANDIDATES:
+        r = get(s, url, retries=2)
+        if r is None:
+            continue
+        try:
+            rows = r.json()
+        except ValueError:
+            warn(f"{url} 回應不是 JSON")
+            continue
+        if not isinstance(rows, list) or not rows:
+            continue
+
+        got = 0
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            code = _pick(row, F_CODE)
+            period = _period(_pick(row, F_YEAR), _pick(row, F_SEASON))
+            gm = _num(_pick_prefix(row, "毛利率"))
+            opm = _num(_pick_prefix(row, "營業利益率"))
+            npm = _num(_pick_prefix(row, "稅後純益率"))
+            if not code or not period:
+                continue
+            if gm is None and opm is None and npm is None:
+                continue
+            out[code] = {"period": period, "gm": gm, "opm": opm, "npm": npm}
+            got += 1
+
+        watch = {c: (c in out) for c in ("2330", "2317", "2454", "2382")}
+        log(f"  {url.rsplit('/', 1)[-1]}：回應 {len(rows)} 列、取到 {got} 家，"
+            f"指標股 → {watch}")
+
+    log(f"📦 營益分析（三率直接來源）：{len(out)} 家")
+    return out
 
 
 def fetch_snapshots(s) -> dict[str, dict]:
@@ -164,15 +220,35 @@ def fetch_snapshots(s) -> dict[str, dict]:
     return out
 
 
+def _migrate(entry: dict) -> dict | None:
+    """歷史檔的舊格式存的是原始金額，新格式直接存三率。舊資料就地換算。"""
+    if entry is None:
+        return None
+    if "gm" in entry or "opm" in entry or "npm" in entry:
+        return entry
+    rates = _rates(entry)          # 舊格式 {revenue, gross, op, net}
+    return rates
+
+
 def merge_history(snapshots: dict[str, dict]) -> dict[str, dict]:
     """把這次抓到的季度併進歷史檔並存回去。回傳合併後的完整歷史。
 
     這是整套三率判斷的關鍵：OpenAPI 只給最新一季，靠這個檔案累積出可比的基期。
+    存的是三率百分比而不是原始金額 —— 比較時只需要比率，存金額既大又多餘。
     """
-    history: dict[str, dict] = read_json(HISTORY_FILE, {})
-    if not isinstance(history, dict):
-        history = {}
-    history.pop("_說明", None)
+    raw: dict = read_json(HISTORY_FILE, {})
+    if not isinstance(raw, dict):
+        raw = {}
+    raw.pop("_說明", None)
+
+    history: dict[str, dict] = {}
+    for code, periods in raw.items():
+        if not isinstance(periods, dict):
+            continue
+        for period, entry in periods.items():
+            migrated = _migrate(entry)
+            if migrated:
+                history.setdefault(code, {})[period] = migrated
 
     added = 0
     for code, snap in snapshots.items():
@@ -180,28 +256,38 @@ def merge_history(snapshots: dict[str, dict]) -> dict[str, dict]:
         bucket = history.setdefault(code, {})
         if period not in bucket:
             added += 1
-        bucket[period] = {
-            "revenue": snap["revenue"],
-            "gross": snap["gross"],
-            "op": snap["op"],
-            "net": snap["net"],
-        }
+        bucket[period] = {"gm": snap["gm"], "opm": snap["opm"], "npm": snap["npm"]}
 
     path = os.path.join(DATA_DIR, HISTORY_FILE)
     payload = {
         "_說明": "由 scripts/fetch_financials.py 自動累積，請勿手動編輯。"
-                 "OpenAPI 只提供最新一季，這個檔案是用來累積歷史基期的。",
+                 "來源只提供最新一季，這個檔案是用來累積歷史基期的。"
+                 "數字是三率百分比：gm 毛利率、opm 營業利益率、npm 稅後淨利率。",
         **{k: history[k] for k in sorted(history)},
     }
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=1, sort_keys=False)
+        json.dump(payload, f, ensure_ascii=False, separators=(",", ":"), sort_keys=False)
     log(f"🗄️  歷史季度：新增 {added} 筆，累計 {sum(len(v) for v in history.values())} 筆"
         f"（{len(history)} 家）")
     return history
 
 
 def _rates(fig: dict) -> dict | None:
-    """算三率（%）。缺營業毛利就回 None，代表這個產業不適用。"""
+    """取出三率（%）。
+
+    兩種輸入都吃：
+      * 新格式 —— 已經是比率 {gm, opm, npm}（營益分析表直接給）
+      * 舊格式 —— 原始金額 {revenue, gross, op, net}，自己除
+
+    缺營業毛利就回 None，代表這個產業（金融／保險／證券）不適用。
+    """
+    if fig is None:
+        return None
+    if "gm" in fig or "opm" in fig or "npm" in fig:
+        if fig.get("gm") is None or fig.get("opm") is None or fig.get("npm") is None:
+            return None
+        return {"gm": fig["gm"], "opm": fig["opm"], "npm": fig["npm"]}
+
     rev = fig.get("revenue")
     if not rev:
         return None
@@ -277,9 +363,24 @@ def evaluate(history: dict[str, dict]) -> dict[str, dict]:
 
 
 def fetch_financials(s) -> dict[str, dict]:
-    snapshots = fetch_snapshots(s)
+    """主來源是營益分析彙總表（全體公司、三率已算好）；
+    綜合損益表拿來補它沒涵蓋到的公司。"""
+    snapshots = fetch_ratios(s)
+
+    filled = 0
+    for code, snap in fetch_snapshots(s).items():
+        if code in snapshots:
+            continue
+        rates = _rates(snap)
+        if rates:
+            snapshots[code] = {"period": snap["period"], **rates}
+            filled += 1
+    if filled:
+        log(f"➕ 綜合損益表補上營益分析沒涵蓋的 {filled} 家")
+
     if not snapshots:
         return {}
+    log(f"📦 三率快照合計：{len(snapshots)} 家")
     history = merge_history(snapshots)
     return evaluate(history)
 

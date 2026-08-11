@@ -14,7 +14,9 @@ from fetch_financials import (
     F_GROSS, F_NET_PARENT, F_OP, F_REVENUE, F_SEASON, F_YEAR,
     _num, _period, _prev_periods, _rates, evaluate,
 )
+from fetch_financials import _migrate
 from fetch_financials import _pick as _pick_fin
+from fetch_financials import _pick_prefix as _prefix
 from fetch_mops import _parse_tables, _roc_to_iso
 from fetch_news import _clean_title, _norm, _parse_rss, attach_to_calls
 from fetch_stocks import _pick
@@ -233,6 +235,43 @@ check("TPEx 的英文年度季別也認得",
 # 金融業那幾支端點實測回的是「每個欄位都空字串」的一列
 EMPTY_ROW = {"出表日期": "1150811", "年度": "", "季別": "", "公司代號": "", "營業收入": ""}
 check("空白列不會被誤收", _num(_pick_fin(EMPTY_ROW, F_REVENUE)), None)
+
+print("\n[營益分析彙總表欄位 —— 用 probe 抓回來的真實欄位鎖住]")
+# 上市：欄位名把算式也寫進去了
+TWSE_RATIO = {
+    "出表日期": "1150811", "年度": "115", "季別": "2",
+    "公司代號": "1213", "公司名稱": "大飲",
+    "營業收入(百萬元)": "150.59",
+    "毛利率(%)(營業毛利)/(營業收入)": "-1.78",
+    "營業利益率(%)(營業利益)/(營業收入)": "-15.27",
+    "稅前純益率(%)(稅前純益)/(營業收入)": "-20.34",
+    "稅後純益率(%)(稅後純益)/(營業收入)": "-20.96",
+}
+check("上市毛利率", _num(_prefix(TWSE_RATIO, "毛利率")), -1.78)
+check("上市營業利益率", _num(_prefix(TWSE_RATIO, "營業利益率")), -15.27)
+check("上市稅後純益率（不是稅前）", _num(_prefix(TWSE_RATIO, "稅後純益率")), -20.96)
+
+# 上櫃：欄位名精簡很多
+TPEX_RATIO = {
+    "Date": "1150811", "Year": "115", "季別": "2",
+    "SecuritiesCompanyCode": "1259", "CompanyName": "安心",
+    "營業收入百萬元": "3091.20", "毛利率": "23.21",
+    "營業利益率": "0.20", "稅前純益率": "2.18", "稅後純益率": "2.13",
+}
+check("上櫃毛利率", _num(_prefix(TPEX_RATIO, "毛利率")), 23.21)
+check("上櫃稅後純益率", _num(_prefix(TPEX_RATIO, "稅後純益率")), 2.13)
+check("上櫃期別（季別是中文鍵、Year 是英文鍵）",
+      _period(_pick_fin(TPEX_RATIO, F_YEAR), _pick_fin(TPEX_RATIO, F_SEASON)), "2026Q2")
+check_true("「毛利率」的前綴比對不會誤抓到「營業利益率」",
+           _prefix(TWSE_RATIO, "毛利率").startswith("-1.78"), _prefix(TWSE_RATIO, "毛利率"))
+
+print("\n[歷史檔舊格式遷移]")
+check("舊格式（原始金額）會換算成三率",
+      _migrate({"revenue": 1000.0, "gross": 500.0, "op": 400.0, "net": 360.0}),
+      {"gm": 50.0, "opm": 40.0, "npm": 36.0})
+check("新格式原樣保留",
+      _migrate({"gm": 1.0, "opm": 2.0, "npm": 3.0}), {"gm": 1.0, "opm": 2.0, "npm": 3.0})
+check("舊格式缺營業毛利 → None", _migrate({"revenue": 1.0, "gross": None, "op": 1.0, "net": 1.0}), None)
 
 print("\n[三率計算]")
 check("三率百分比", _rates({"revenue": 1000.0, "gross": 560.0, "op": 450.0, "net": 410.0}),
