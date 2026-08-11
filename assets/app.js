@@ -44,6 +44,7 @@
 
   var META = EARNINGS.meta || {};
   var CALLS = EARNINGS.calls || {};
+  var RECENT = EARNINGS.recent || {};   // 掛不到任何場次的近期報導
   var ITEMS = STOCKS.items;
 
   var MARKET_LABEL = { sii: "上市", otc: "上櫃", rotc: "興櫃" };
@@ -170,6 +171,32 @@
       '<span class="readout-hint">' + esc(callsFor(code).length) + " 場法說會紀錄</span>");
   }
 
+  // ---- 渲染：報導清單（場次內與空狀態共用） --------------------------------
+  function isUdn(item) {
+    return /經濟日報|money\.udn/.test((item.source || "") + (item.url || ""));
+  }
+  function newsListMarkup(news) {
+    var sorted = (news || []).slice().sort(function (a, b) {
+      var au = isUdn(a) ? 0 : 1, bu = isUdn(b) ? 0 : 1;   // 經濟日報排前面
+      if (au !== bu) return au - bu;
+      return (b.date || "") < (a.date || "") ? -1 : 1;
+    });
+    var out = ['<ul class="newslist">'];
+    for (var i = 0; i < sorted.length; i++) {
+      var it = sorted[i];
+      out.push("<li>" +
+        '<a class="news-title" href="' + esc(it.url) + '" target="_blank" rel="noopener noreferrer">' +
+          esc(it.title) + "</a>" +
+        '<div class="news-meta">' +
+          (it.date ? '<span class="news-date">' + esc(it.date) + "</span>" : "") +
+          (it.source ? '<span class="news-source' + (isUdn(it) ? " udn" : "") + '">' +
+            esc(it.source) + "</span>" : "") +
+        "</div></li>");
+    }
+    out.push("</ul>");
+    return out.join("");
+  }
+
   // ---- 渲染：單一場次 ------------------------------------------------------
   function renderCall(code, call) {
     var body = el("call-body");
@@ -207,6 +234,11 @@
       }
       parts.push("</div>");
     }
+
+    // MOPS 的「法人說明會擇要訊息」
+    if (call.summary) {
+      parts.push('<p class="note" style="margin-top:14px">' + esc(call.summary) + "</p>");
+    }
     parts.push("</div>");
 
     // 人工補充的重點
@@ -220,30 +252,12 @@
     }
 
     // 相關報導（經濟日報優先）
-    var news = (call.news || []).slice().sort(function (a, b) {
-      var au = /經濟日報|money\.udn/.test((a.source || "") + (a.url || "")) ? 0 : 1;
-      var bu = /經濟日報|money\.udn/.test((b.source || "") + (b.url || "")) ? 0 : 1;
-      if (au !== bu) return au - bu;
-      return (b.date || "") < (a.date || "") ? -1 : 1;
-    });
+    var news = call.news || [];
     parts.push('<div class="card">');
     parts.push('<div class="section-title">📰 相關報導 <span class="count">' +
                esc(news.length) + " 則</span></div>");
     if (news.length) {
-      parts.push('<ul class="newslist">');
-      for (var k = 0; k < news.length; k++) {
-        var it = news[k];
-        var isUdn = /經濟日報|money\.udn/.test((it.source || "") + (it.url || ""));
-        parts.push("<li>" +
-          '<a class="news-title" href="' + esc(it.url) + '" target="_blank" rel="noopener noreferrer">' +
-            esc(it.title) + "</a>" +
-          '<div class="news-meta">' +
-            (it.date ? '<span class="news-date">' + esc(it.date) + "</span>" : "") +
-            (it.source ? '<span class="news-source' + (isUdn ? " udn" : "") + '">' +
-              esc(it.source) + "</span>" : "") +
-          "</div></li>");
-      }
-      parts.push("</ul>");
+      parts.push(newsListMarkup(news));
     } else {
       parts.push('<p class="note">這一場還沒有抓到相關報導。</p>');
     }
@@ -256,12 +270,21 @@
   // ---- 渲染：查無場次的空狀態 ----------------------------------------------
   function renderEmpty(code) {
     var known = !!ITEMS[code];
-    html(el("call-body"),
-      '<div class="empty">' +
-        '<div class="empty-title">尚無 ' + esc(known ? nameOf(code) : code) + ' 的法說會紀錄</div>' +
-        '<div class="empty-note">資料檔裡還沒有這檔的場次。可以直接到下面兩個地方查：</div>' +
-        outLinks(code) +
-      "</div>");
+    var out = ['<div class="empty">' +
+      '<div class="empty-title">尚無 ' + esc(known ? nameOf(code) : code) + ' 的法說會紀錄</div>' +
+      '<div class="empty-note">資料檔裡還沒有這檔的場次。可以直接到下面兩個地方查：</div>' +
+      outLinks(code) +
+      "</div>"];
+
+    // 有抓到報導、但對不上任何場次的，還是列出來給使用者
+    var loose = RECENT[code] || [];
+    if (loose.length) {
+      out.push('<div class="card" style="margin-top:14px">' +
+        '<div class="section-title">📰 近期相關報導 <span class="count">' +
+        esc(loose.length) + " 則</span></div>" +
+        newsListMarkup(loose) + "</div>");
+    }
+    html(el("call-body"), out.join(""));
   }
 
   // ---- 場次下拉 -----------------------------------------------------------

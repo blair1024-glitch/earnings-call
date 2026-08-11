@@ -1,0 +1,65 @@
+name: 更新法說會資料
+
+on:
+  schedule:
+    # 台灣時間每天 09:00（UTC 01:00）
+    - cron: "0 1 * * *"
+  workflow_dispatch:
+    inputs:
+      probe:
+        description: "只探測來源端點、不寫入資料檔"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-data
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: scripts/requirements.txt
+
+      - name: 安裝相依套件
+        run: pip install -r scripts/requirements.txt
+
+      # 離線測試：不連網，只驗證 parser 邏輯。壞掉就別讓它去覆蓋資料檔。
+      - name: 解析器測試
+        run: python scripts/test_parsers.py
+
+      # 探測模式：把各來源的實際回應印到 log，用來確認端點有沒有又改掉
+      - name: 探測來源端點
+        if: inputs.probe
+        run: |
+          python scripts/fetch_stocks.py --probe
+          python scripts/fetch_mops.py --probe
+          python scripts/fetch_news.py --probe
+
+      - name: 產生資料檔
+        if: ${{ !inputs.probe }}
+        run: python scripts/build.py
+
+      - name: 提交變更
+        if: ${{ !inputs.probe }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/stocks.js data/earnings.js
+          if git diff --staged --quiet; then
+            echo "資料沒有變化，不做 commit"
+          else
+            git commit -m "data: 更新法說會資料（$(TZ=Asia/Taipei date '+%Y-%m-%d %H:%M')）"
+            git push
+          fi
