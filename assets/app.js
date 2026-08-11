@@ -140,6 +140,17 @@
   }
 
   // ---- 場次資料 -----------------------------------------------------------
+  /* 資料檔為了縮小體積，不存 id / label / kind（id 跟 date 一樣、label 可推導、
+     kind 幾乎都是「法人說明會」），所以這裡補回來。
+     舊資料如果有帶這些欄位，就沿用舊的。 */
+  function callId(call) { return call.id || call.date || ""; }
+  function callKind(call) { return call.kind || "法人說明會"; }
+  function callLabel(call, i) {
+    if (call.label) return call.label;
+    if (call.date) return call.date.replace(/-/g, "/") + " " + callKind(call);
+    return "第 " + (i + 1) + " 場";
+  }
+
   function callsFor(code) {
     var list = CALLS[code];
     if (!list || !list.length) return [];
@@ -281,13 +292,13 @@
     var parts = [];
 
     parts.push('<div class="card">');
-    parts.push('<div class="call-title">' + esc(nameOf(code)) + "　" + esc(call.label || "") + "</div>");
+    parts.push('<div class="call-title">' + esc(nameOf(code)) + "　" + esc(callLabel(call, 0)) + "</div>");
     if (call.date) parts.push('<div class="call-sub">' + esc(call.date) + "</div>");
 
     // 場次基本資訊
     var stats = [];
     if (call.date)  stats.push(['日期', call.date, 's-g']);
-    if (call.kind)  stats.push(['性質', call.kind, 's-y']);
+    stats.push(['性質', callKind(call), 's-y']);
     if (call.place) stats.push(['地點', call.place, 's-y']);
     if (stats.length) {
       parts.push('<div class="stats" style="margin-top:14px">');
@@ -377,8 +388,8 @@
     var out = [], picked = 0;
     for (var i = 0; i < list.length; i++) {
       var c = list[i];
-      var label = c.label || c.date || ("第 " + (i + 1) + " 場");
-      if (wantId && c.id === wantId) picked = i;
+      var label = callLabel(c, i);
+      if (wantId && callId(c) === wantId) picked = i;
       out.push('<option value="' + esc(String(i)) + '">' + esc(label) + "</option>");
     }
     html(callSelect, out.join(""));
@@ -431,7 +442,7 @@
     if (call) { renderCall(code, call); } else { renderEmpty(code); }
 
     store("ec-stock", code);
-    writeParams(code, call ? call.id : null);
+    writeParams(code, call ? callId(call) : null);
   }
 
   // 下拉選股
@@ -472,7 +483,7 @@
     if (!current) return;
     var list = callsFor(current);
     var call = list[Number(callSelect.value) || 0];
-    if (call) { renderCall(current, call); writeParams(current, call.id); }
+    if (call) { renderCall(current, call); writeParams(current, callId(call)); }
   });
 
   // ---- 啟動 ---------------------------------------------------------------

@@ -115,6 +115,13 @@ def fetch_snapshots(s) -> dict[str, dict]:
         if not isinstance(rows, list) or not rows:
             continue
 
+        # 診斷用：這幾檔一定是一般業大型股，如果連它們都不在回應裡，
+        # 代表這個端點給的不是「全部公司的最新一季」，而是某種增量或部分資料。
+        raw_codes = {str(r.get("公司代號") or r.get("SecuritiesCompanyCode") or "").strip()
+                     for r in rows if isinstance(r, dict)}
+        watch = {c: (c in raw_codes) for c in ("2330", "2317", "2454", "2382")}
+        log(f"  {url.rsplit('/', 1)[-1]}：回應共 {len(rows)} 列，指標股在不在 → {watch}")
+
         got = 0
         for row in rows:
             if not isinstance(row, dict):

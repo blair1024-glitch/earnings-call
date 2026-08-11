@@ -174,11 +174,12 @@ def fetch_mops(s, months: int = 24) -> dict[str, list[dict]]:
                     continue
                 place = (rec.get("place") or "").strip()
                 summary = (rec.get("summary") or "").strip()
+                # 刻意不輸出 id / label / kind：
+                #   id 跟 date 完全一樣、label 可以由 date 推導、
+                #   kind 幾乎清一色是「法人說明會」。
+                # 三者加起來原本佔了 earnings.js 的 19%，改由前端組出來。
                 call = {
-                    "id": iso,
-                    "label": f"{iso.replace('-', '/')} 法人說明會",
                     "date": iso,
-                    "kind": "法人說明會",
                     "place": place,
                     "summary": summary,
                     "deck": rec.get("deck") or rec.get("deck_en"),

@@ -89,7 +89,9 @@ def write_js(filename: str, varname: str, payload: Any, header: str) -> None:
     刻意用 .js 而不是 .json，這樣直接用瀏覽器開本機 index.html 也不會被 CORS 擋。"""
     path = os.path.join(DATA_DIR, filename)
     os.makedirs(DATA_DIR, exist_ok=True)
-    body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=False)
+    # 用最緊湊的分隔符，不縮排 —— 這些是機器產生、瀏覽器要下載的檔案，
+    # 不是給人讀的。實測 earnings.js 光是 indent=2 的空白就佔了 1.7MB。
+    body = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=False)
     with open(path, "w", encoding="utf-8") as f:
         f.write(header.rstrip() + "\n")
         f.write(f"window.{varname} = {body};\n")

@@ -148,24 +148,39 @@ calls = {
 }
 news = {
     "2330": [
-        {"title": "會前預告", "date": "2026-07-14", "url": "u1"},   # 會前 2 天 → 掛 7/16
-        {"title": "會後解讀", "date": "2026-07-20", "url": "u2"},   # 會後 4 天 → 掛 7/16
-        {"title": "上一季",   "date": "2026-04-18", "url": "u3"},   # → 掛 4/17
-        {"title": "太久以前", "date": "2025-01-01", "url": "u4"},   # 不在任何視窗 → leftover
-        {"title": "沒有日期", "date": "",           "url": "u5"},   # → leftover
+        {"title": "法說會前瞻", "date": "2026-07-14", "url": "u1"},   # 相關，會前 2 天 → 掛 7/16
+        {"title": "法說會解讀", "date": "2026-07-20", "url": "u2"},   # 相關，會後 4 天 → 掛 7/16
+        {"title": "上季法說會", "date": "2026-04-18", "url": "u3"},   # 相關 → 掛 4/17
+        {"title": "去年的法說會", "date": "2025-01-01", "url": "u4"},  # 相關但不在視窗 → leftover
+        {"title": "沒有日期的法說會", "date": "", "url": "u5"},        # 相關但沒日期 → leftover
+        {"title": "月營收快報", "date": "2025-03-01", "url": "u6"},    # 無關且不在視窗 → 丟棄
+        {"title": "股價創新高", "date": "2026-07-17", "url": "u7"},    # 無關但在視窗 → 留著但排後面
     ]
 }
 leftovers = attach_to_calls(calls, news)
-check("7/16 場掛到 2 則", len(calls["2330"][0]["news"]), 2)
+check("7/16 場掛到 3 則（含 1 則視窗內的補充）", len(calls["2330"][0]["news"]), 3)
+check_true("相關的排在無關的前面",
+           [x["url"] for x in calls["2330"][0]["news"]][:2] == ["u1", "u2"],
+           str([x["url"] for x in calls["2330"][0]["news"]]))
 check("4/17 場掛到 1 則", len(calls["2330"][1]["news"]), 1)
 check("落單 2 則", len(leftovers.get("2330", [])), 2)
-check_true("落單的是 u4/u5",
+check_true("落單的是 u4/u5（相關但掛不上場次）",
            {x["url"] for x in leftovers["2330"]} == {"u4", "u5"},
            str(leftovers.get("2330")))
+check_true("與法說會無關又不在視窗內的被丟棄",
+           "u6" not in {x["url"] for v in calls["2330"] for x in v["news"]}
+           and "u6" not in {x["url"] for x in leftovers.get("2330", [])}, "u6 不該出現")
+
+print("\n[報導掛載：每場數量上限]")
+many = {"2330": [{"title": f"法說會報導{i}", "date": "2026-07-17", "url": f"m{i}"}
+                 for i in range(20)]}
+calls3 = {"2330": [{"date": "2026-07-16", "news": []}]}
+attach_to_calls(calls3, many)
+check("每場最多留 6 則", len(calls3["2330"][0]["news"]), 6)
 
 print("\n[報導掛載：這家還沒開過法說會]")
 calls2: dict = {}
-left2 = attach_to_calls(calls2, {"9999": [{"title": "t", "date": "2026-07-01", "url": "u"}]})
+left2 = attach_to_calls(calls2, {"9999": [{"title": "首場法說會將登場", "date": "2026-07-01", "url": "u"}]})
 check("全部歸入 leftover，不會憑空生出場次", len(left2["9999"]), 1)
 check("不會新增 calls 條目", "9999" in calls2, False)
 
