@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-Hant" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>台股法說會重點</title>
+<meta name="description" content="選股票或直接輸入代號，查該公司歷次法人說明會的官方簡報與相關報導，預設顯示最新一場。">
+<meta name="color-scheme" content="light dark">
+<meta property="og:title" content="台股法說會重點">
+<meta property="og:description" content="選股票 → 選場次 → 看官方簡報與經濟日報相關報導">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎙️</text></svg>">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header class="masthead">
+  <div class="masthead-inner">
+    <div class="brand">
+      <span class="brand-name">🎙️ 台股法說會重點</span>
+    </div>
+    <div class="masthead-meta">
+      <span class="stamp" id="stamp">—</span>
+      <button class="theme-btn" id="theme-btn" type="button" aria-label="切換深色／淺色模式" title="切換深色／淺色模式">◐</button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <div class="fixture-banner" id="fixture-banner" hidden>
+    ⚠️ <strong>目前顯示的是範例資料</strong>　—　尚未接上真實來源，畫面上的場次與日期都是假的，只用來測試介面。
+  </div>
+
+  <div class="hero">
+    <h1>選一檔股票，看它每一次法說會說了什麼</h1>
+    <p class="sub">下拉挑選或直接輸入代號／名稱，場次預設停在<strong>最新一場</strong>。</p>
+  </div>
+
+  <!-- ── 選股列 ───────────────────────────────────────────── -->
+  <section class="block" id="picker-block">
+    <div class="card">
+      <div class="picker">
+        <div class="picker-field">
+          <label class="picker-label" for="stock-select">選擇股票</label>
+          <select id="stock-select"></select>
+        </div>
+
+        <div class="picker-field">
+          <label class="picker-label" for="stock-code">或自行輸入代號／名稱</label>
+          <input id="stock-code" type="text" list="stock-codes" autocomplete="off"
+                 spellcheck="false" placeholder="例如 2330 或 台積電" maxlength="12">
+          <datalist id="stock-codes"></datalist>
+        </div>
+
+        <div class="picker-field">
+          <label class="picker-label" for="call-select">法說會場次</label>
+          <select id="call-select"></select>
+        </div>
+      </div>
+
+      <!-- 同步顯示股票名稱 -->
+      <div class="picker-readout" id="stock-readout" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <!-- ── 內容區（由 app.js 渲染） ──────────────────────────── -->
+  <section class="block" id="call-block">
+    <div id="call-body"></div>
+  </section>
+
+  <footer class="site">
+    <div>🎙️ 台股法說會重點 — 場次與簡報來自<strong>公開資訊觀測站</strong>，相關報導來自<strong>經濟日報</strong>等新聞來源</div>
+    <div class="disclaimer">本頁僅彙整公開資訊與新聞連結，<strong>不轉載新聞全文</strong>，內容僅供參考，不構成任何投資建議。所有數據與說法請以公司正式公告及原始報導為準。</div>
+  </footer>
+
+</main>
+
+<script src="data/stocks.js"></script>
+<script src="data/earnings.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>
