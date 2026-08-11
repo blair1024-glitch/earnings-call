@@ -29,17 +29,30 @@ import sys
 
 from common import DATA_DIR, get, log, probe, read_json, session, warn
 
-# 綜合損益表候選端點（不同產業別是不同檔）
+# 「營益分析查詢彙總表」—— 從 swagger 規格挖出來的，是**全體公司彙總**，
+# 而且本來就有算好的比率。比綜合損益表好用，因為後者被拆成六個產業分類，
+# 只用其中一份會漏掉大半公司（實測 t187ap06_L_ci 只有 336 家，台積電不在裡面）。
+RATIO_CANDIDATES = [
+    "https://openapi.twse.com.tw/v1/opendata/t187ap17_L",        # 上市
+    "https://www.tpex.org.tw/openapi/v1/mopsfin_187ap17_O",      # 上櫃（注意沒有 t）
+]
+
+# 綜合損益表候選端點（不同產業別是不同檔，六類要全抓才不會漏公司）
 IS_CANDIDATES = [
     # 上市
     "https://openapi.twse.com.tw/v1/opendata/t187ap06_L_ci",     # 一般業
+    "https://openapi.twse.com.tw/v1/opendata/t187ap06_L_fh",     # 金控業 ← 原本漏掉
     "https://openapi.twse.com.tw/v1/opendata/t187ap06_L_basi",   # 金融業
-    "https://openapi.twse.com.tw/v1/opendata/t187ap06_L_bd",     # 票券業
+    "https://openapi.twse.com.tw/v1/opendata/t187ap06_L_bd",     # 證券期貨業
     "https://openapi.twse.com.tw/v1/opendata/t187ap06_L_ins",    # 保險業
-    "https://openapi.twse.com.tw/v1/opendata/t187ap06_L_mim",    # 證券業
+    "https://openapi.twse.com.tw/v1/opendata/t187ap06_L_mim",    # 異業
     # 上櫃
     "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap06_O_ci",
+    "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap06_O_fh",
     "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap06_O_basi",
+    "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap06_O_bd",
+    "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap06_O_ins",
+    "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap06_O_mim",
 ]
 
 HISTORY_FILE = "financial_history.json"
@@ -303,8 +316,10 @@ def discover(s) -> None:
 if __name__ == "__main__":
     s = session()
     if "--probe" in sys.argv:
-        discover(s)
-        probe(s, IS_CANDIDATES, label="綜合損益表（三率來源）")
+        probe(s, RATIO_CANDIDATES, label="營益分析彙總表（三率的更好來源？）")
+        probe(s, IS_CANDIDATES, label="綜合損益表（六個產業分類）")
+        if "--discover" in sys.argv:
+            discover(s)
     else:
         result = fetch_financials(s)
         log(f"2330 → {result.get('2330')}")
