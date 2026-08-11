@@ -46,6 +46,7 @@ jobs:
           python scripts/fetch_stocks.py --probe
           python scripts/fetch_mops.py --probe
           python scripts/fetch_news.py --probe
+          python scripts/fetch_financials.py --probe
 
       - name: 產生資料檔
         if: ${{ !inputs.probe }}
