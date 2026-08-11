@@ -271,9 +271,39 @@ def fetch_financials(s) -> dict[str, dict]:
     return evaluate(history)
 
 
+def discover(s) -> None:
+    """列出 TWSE / TPEx OpenAPI 規格裡所有跟財務報表有關的端點。
+
+    起因：t187ap06_L_ci 只有 336 家，台積電、鴻海、廣達都不在裡面，
+    但聯發科在 —— 代表損益表被拆成好幾份資料集，我們只用到其中一份。
+    與其猜端點名稱，直接把服務自己的 API 規格抓下來看。
+    """
+    for spec_url in ("https://openapi.twse.com.tw/v1/swagger.json",
+                     "https://www.tpex.org.tw/openapi/swagger.json"):
+        log(f"\n=== 列出端點：{spec_url} ===")
+        r = get(s, spec_url, retries=1)
+        if r is None:
+            log("  抓不到規格")
+            continue
+        try:
+            spec = r.json()
+        except ValueError:
+            log(f"  回應不是 JSON：{r.text[:200]!r}")
+            continue
+        paths = spec.get("paths", {})
+        log(f"  共 {len(paths)} 個端點，其中跟損益／財報有關的：")
+        for path, meta in sorted(paths.items()):
+            blob = (path + " " + json.dumps(meta, ensure_ascii=False))[:600]
+            if any(k in blob for k in ("損益", "財務報表", "ap06", "綜合損益", "財報")):
+                get_meta = meta.get("get", {})
+                summary = get_meta.get("summary") or get_meta.get("description") or ""
+                log(f"    {path}  —  {summary[:70]}")
+
+
 if __name__ == "__main__":
     s = session()
     if "--probe" in sys.argv:
+        discover(s)
         probe(s, IS_CANDIDATES, label="綜合損益表（三率來源）")
     else:
         result = fetch_financials(s)
