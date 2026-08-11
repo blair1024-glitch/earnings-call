@@ -64,8 +64,21 @@
     </div>
   </section>
 
-  <!-- ── 內容區（由 app.js 渲染） ──────────────────────────── -->
+  <!-- ── 財報體質（三率）：屬於「這檔股票」，不屬於某一場法說會 ────── -->
+  <section class="block" id="fin-block" hidden>
+    <div class="block-head">
+      <h2>📊 財報體質</h2>
+      <span class="hint">三率＝毛利率／營業利益率／稅後淨利率</span>
+    </div>
+    <div id="fin-body"></div>
+  </section>
+
+  <!-- ── 法說會場次內容（由 app.js 渲染） ─────────────────── -->
   <section class="block" id="call-block">
+    <div class="block-head">
+      <h2>🎙️ 這一場法說會</h2>
+      <span class="hint">財報看過去，法說會看下一季</span>
+    </div>
     <div id="call-body"></div>
   </section>
 
@@ -78,6 +91,7 @@
 
 <script src="data/stocks.js"></script>
 <script src="data/earnings.js"></script>
+<script src="data/financials.js"></script>
 <script src="assets/app.js"></script>
 </body>
 </html>

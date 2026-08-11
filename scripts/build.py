@@ -1,7 +1,8 @@
-"""把三路來源合成網站要用的兩個資料檔。
+"""把各路來源合成網站要用的資料檔。
 
-  data/stocks.js    ← TWSE / TPEx 公司清單
-  data/earnings.js  ← MOPS 法說會場次 ＋ 新聞 RSS 相關報導 ＋ data/notes.json 人工重點
+  data/stocks.js     ← TWSE / TPEx 公司清單
+  data/earnings.js   ← MOPS 法說會場次 ＋ 新聞 RSS 相關報導 ＋ data/notes.json 人工重點
+  data/financials.js ← 綜合損益表算出的三率與升降判斷
 
 設計原則：**單一來源失敗，就不要覆蓋那個檔案**，寧可讓網站繼續用上一版資料，
 也不要寫出一個空檔把好資料洗掉。
@@ -12,6 +13,7 @@ from __future__ import annotations
 import sys
 
 from common import DATA_DIR, log, now_taipei, read_json, session, warn, write_js
+from fetch_financials import fetch_financials
 from fetch_mops import fetch_mops
 from fetch_news import attach_to_calls, fetch_news
 from fetch_stocks import fetch_stocks
@@ -21,9 +23,22 @@ DEFAULT_CONFIG = {
                  "2308", "3711", "2303", "3034", "2412", "2881"],
     "months": 24,
     "fetchNews": True,
+    "fetchFinancials": True,
     "searchUrl": "https://money.udn.com/search/result/1001/{q}",
     "mopsUrl": "https://mops.twse.com.tw/mops/web/t100sb02_1",
 }
+
+FINANCIALS_HEADER = """/**
+ * 財報體質（三率）  —  window.FINANCIALS
+ * ⚠️ 這個檔案由 scripts/build.py 自動產生，請不要手動編輯。
+ *
+ * 三率 = 毛利率、營業利益率、稅後淨利率，數字單位是 %。
+ * basis 是比較基期：YoY = 去年同季（法人的標準比法），QoQ = 上一季。
+ * applicable=false 代表這個產業的損益表沒有營業毛利（金融／保險／證券），
+ * 公式不適用，不會硬算一個數字出來。
+ *
+ * 這是描述過去財報的落後指標，不是預測，也不是任何投資建議。
+ */"""
 
 STOCKS_HEADER = """/**
  * 股票代號對照表  —  window.STOCKS
@@ -64,7 +79,7 @@ def main() -> int:
     failures: list[str] = []
 
     # ---------- 1. 股票清單 ----------
-    log("\n── 1/3 股票清單 ─────────────────────────────")
+    log("\n── 1/4 股票清單 ─────────────────────────────")
     items = fetch_stocks(s)
     if items:
         write_js("stocks.js", "STOCKS",
@@ -75,7 +90,7 @@ def main() -> int:
         warn("股票清單抓取失敗 → 保留現有的 data/stocks.js 不覆蓋")
 
     # ---------- 2. 法說會場次 ----------
-    log("\n── 2/3 MOPS 法說會場次 ──────────────────────")
+    log("\n── 2/4 MOPS 法說會場次 ──────────────────────")
     calls = fetch_mops(s, months=int(cfg["months"]))
     if not calls:
         failures.append("法說會場次")
@@ -84,7 +99,7 @@ def main() -> int:
         return 1
 
     # ---------- 3. 相關報導 ----------
-    log("\n── 3/3 相關報導 RSS ─────────────────────────")
+    log("\n── 3/4 相關報導 RSS ─────────────────────────")
     recent: dict[str, list[dict]] = {}
     if cfg.get("fetchNews"):
         name_of = {c: (items.get(c) or ["", ""])[0] for c in cfg["featured"]}
@@ -100,6 +115,19 @@ def main() -> int:
                 warn("新聞 RSS 沒抓到任何東西，場次仍會照常輸出")
     else:
         log("  config.fetchNews = false，跳過")
+
+    # ---------- 3.5 財報體質（三率） ----------
+    log("\n── 4/4 財報體質（三率） ─────────────────────")
+    if cfg.get("fetchFinancials"):
+        fin = fetch_financials(s)
+        if fin:
+            write_js("financials.js", "FINANCIALS",
+                     {"updated": stamp, "items": fin}, FINANCIALS_HEADER)
+        else:
+            failures.append("財報三率")
+            warn("損益表抓取失敗 → 保留現有的 data/financials.js 不覆蓋")
+    else:
+        log("  config.fetchFinancials = false，跳過")
 
     # ---------- 4. 併入人工重點 ----------
     merged = 0
@@ -140,7 +168,7 @@ def _report(failures: list[str]) -> None:
     if failures:
         log("⚠️  下列來源這次失敗（相關檔案已保留舊版）：" + "、".join(failures))
     else:
-        log("✅ 三路來源都成功")
+        log("✅ 所有來源都成功")
 
 
 if __name__ == "__main__":

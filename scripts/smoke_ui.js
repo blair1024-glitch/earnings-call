@@ -99,8 +99,47 @@ function check(name, cond, extra) {
     document.documentElement.scrollWidth - document.documentElement.clientWidth);
   check('360px 寬不橫向捲動', overflow <= 0, 'overflow=' + overflow);
 
-  // ---------- 12. 零外部請求 ----------
-  console.log('\n[12] 零外部請求');
+  // ---------- 12. 財報體質（三率） ----------
+  console.log('\n[12] 財報體質（三率）');
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await page.goto(BASE + '?stock=2330', { waitUntil: 'networkidle' });
+  check('三率區塊有顯示', await page.locator('#fin-block').isVisible());
+  check('判為三率三升',
+    (await page.locator('#fin-body .verdict-badge').nth(1).textContent()).includes('三率三升'));
+  check('有標示比較基期是去年同季',
+    (await page.locator('.fin-basis').textContent()).includes('去年同季'));
+  const tiles = await page.locator('#fin-body .stat').count();
+  check('三個率各一塊', tiles === 3, 'count=' + tiles);
+  check('毛利率數值有顯示',
+    (await page.locator('#fin-body .stat-value').first().textContent()).includes('%'));
+  check('升降有標 pp',
+    (await page.locator('#fin-body .stat-delta').first().textContent()).includes('pp'));
+
+  await page.goto(BASE + '?stock=2454', { waitUntil: 'networkidle' });
+  check('2454 判為三率二升',
+    (await page.locator('#fin-body .verdict-badge').nth(1).textContent()).includes('三率二升'));
+  const npmDelta = await page.locator('#fin-body .stat-delta').nth(2).getAttribute('class');
+  check('淨利率下降標成 down', npmDelta.includes('down'), npmDelta);
+
+  await page.goto(BASE + '?stock=3231', { waitUntil: 'networkidle' });
+  check('3231 標示比較基期是上一季',
+    (await page.locator('.fin-basis').textContent()).includes('上一季'));
+
+  await page.goto(BASE + '?stock=2881', { waitUntil: 'networkidle' });
+  check('金融業標為不適用',
+    (await page.locator('#fin-body').textContent()).includes('不適用'));
+  check('金融業不顯示三率數字', (await page.locator('#fin-body .stat').count()) === 0);
+
+  await page.goto(BASE + '?stock=6669', { waitUntil: 'networkidle' });
+  check('沒有基期時不給判斷結論',
+    (await page.locator('#fin-body').textContent()).includes('還沒有可比較的基期'));
+  check('沒有基期時仍顯示當季三率', (await page.locator('#fin-body .stat').count()) === 3);
+
+  await page.goto(BASE + '?stock=2317', { waitUntil: 'networkidle' });
+  check('沒有財報資料時整個區塊隱藏', await page.locator('#fin-block').isHidden());
+
+  // ---------- 13. 零外部請求 ----------
+  console.log('\n[13] 零外部請求');
   const external = requests.filter(u => !u.startsWith(BASE) && !u.startsWith('data:'));
   check('沒有任何外部請求', external.length === 0, external.join(', '));
 

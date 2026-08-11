@@ -6,6 +6,7 @@
 
   var STOCKS = window.STOCKS;
   var EARNINGS = window.EARNINGS;
+  var FINANCIALS = window.FINANCIALS || { items: {} };
 
   // ---- helpers ------------------------------------------------------------
   function el(id) { return document.getElementById(id); }
@@ -169,6 +170,83 @@
       '<span class="readout-name">' + esc(nameOf(code)) + "</span>" +
       (market ? '<span class="readout-market">' + esc(market) + "</span>" : "") +
       '<span class="readout-hint">' + esc(callsFor(code).length) + " 場法說會紀錄</span>");
+  }
+
+  // ---- 渲染：財報體質（三率） ----------------------------------------------
+  var RATE_LABEL = { gm: "毛利率", opm: "營業利益率", npm: "稅後淨利率" };
+  var RATE_ORDER = ["gm", "opm", "npm"];
+
+  function fmtPct(v) { return (v == null ? "—" : Number(v).toFixed(2) + "%"); }
+  function fmtDelta(v) {
+    if (v == null) return "";
+    return (v > 0 ? "▲ +" : v < 0 ? "▼ " : "— ") + Number(v).toFixed(2) + " pp";
+  }
+  function deltaClass(v) { return v > 0 ? "up" : v < 0 ? "down" : "flat"; }
+
+  function renderFinancials(code) {
+    var block = el("fin-block");
+    var body = el("fin-body");
+    var fin = (FINANCIALS.items || {})[code];
+
+    if (!fin) { block.hidden = true; return; }
+    block.hidden = false;
+
+    // 金融／保險／證券業：損益表沒有營業毛利，公式不適用
+    if (fin.applicable === false) {
+      html(body, '<div class="card"><p class="note">' +
+        esc(fin.reason || "這個產業不適用三率公式") +
+        "（" + esc(fin.period || "") + "）</p></div>");
+      return;
+    }
+
+    var rates = fin.rates || {};
+    var parts = ['<div class="card">'];
+
+    // 判斷徽章 + 比較基期
+    parts.push('<div class="fin-head">');
+    if (FINANCIALS.fixture) {
+      parts.push('<span class="verdict-badge s-y">⚠️ 範例數字</span>');
+    }
+    if (fin.verdict) {
+      var sig = fin.rising === 3 ? "s-g" : fin.rising === 2 ? "s-y" : "s-r";
+      parts.push('<span class="verdict-badge ' + sig + '">' + esc(fin.verdict) + "</span>");
+    }
+    if (fin.basePeriod) {
+      parts.push('<span class="fin-basis"><code>' + esc(fin.period) + "</code> vs <code>" +
+        esc(fin.basePeriod) + "</code>（" +
+        (fin.basis === "YoY" ? "去年同季" : "上一季") + "）</span>");
+    } else {
+      parts.push('<span class="fin-basis">' +
+        esc(fin.reason || "尚無可比較的基期") +
+        "（本季 <code>" + esc(fin.period) + "</code>）</span>");
+    }
+    parts.push("</div>");
+
+    // 三個率各自一塊，數字與升降都攤開
+    parts.push('<div class="stats">');
+    for (var i = 0; i < RATE_ORDER.length; i++) {
+      var k = RATE_ORDER[i];
+      var d = fin.delta ? fin.delta[k] : null;
+      var cls = d == null ? "s-y" : d > 0 ? "s-g" : d < 0 ? "s-r" : "s-y";
+      parts.push('<div class="stat ' + cls + '">' +
+        '<div class="stat-label">' + esc(RATE_LABEL[k]) + "</div>" +
+        '<div class="stat-value">' + esc(fmtPct(rates[k])) + "</div>" +
+        (d == null ? "" :
+          '<div class="stat-delta ' + deltaClass(d) + '">' + esc(fmtDelta(d)) +
+          (fin.baseRates ? "　(前期 " + esc(fmtPct(fin.baseRates[k])) + ")" : "") +
+          "</div>") +
+        "</div>");
+    }
+    parts.push("</div>");
+
+    parts.push('<p class="fin-foot">三率是<strong>描述已公布財報</strong>的落後指標，' +
+      '法說會談的則是下一季展望，兩者時間軸不同。' +
+      '另外，處分資產或匯兌等一次性業外收益會讓稅後淨利率虛升，' +
+      '出現「三率三升但獲利品質不佳」的情況，所以三個數字都攤開來看比單一結論可靠。' +
+      '本區僅為公開財報的計算結果，不構成投資建議。</p>');
+    parts.push("</div>");
+
+    html(body, parts.join(""));
   }
 
   // ---- 渲染：報導清單（場次內與空狀態共用） --------------------------------
@@ -347,6 +425,7 @@
     if (!opts.fromInput) codeInput.value = code;
 
     renderReadout(code, code);
+    renderFinancials(code);
 
     var call = fillCallSelect(code, opts.callId);
     if (call) { renderCall(code, call); } else { renderEmpty(code); }

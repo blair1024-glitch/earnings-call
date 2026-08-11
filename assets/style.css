@@ -296,6 +296,30 @@ a:hover { text-decoration: underline; }
   background: var(--green-soft);
 }
 
+/* ---- 財報體質（三率） ---- */
+.fin-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-bottom: 14px; }
+.verdict-badge {
+  display: inline-flex; align-items: center; gap: 7px;
+  border: 1px solid var(--sig, var(--border-strong));
+  background: var(--sig-soft, var(--bg-sunken));
+  color: var(--sig, var(--text));
+  border-radius: 999px; padding: 5px 14px;
+  font-size: .95rem; font-weight: 750;
+}
+.fin-basis { color: var(--text-muted); font-size: .85rem; }
+.fin-basis code {
+  font-family: var(--mono); font-size: .85em;
+  background: var(--bg-sunken); border-radius: 4px; padding: 1px 5px;
+}
+.stat-delta { font-family: var(--mono); font-size: .82rem; font-weight: 650; margin-top: 2px; }
+.stat-delta.up { color: var(--green); }
+.stat-delta.down { color: var(--red); }
+.stat-delta.flat { color: var(--text-faint); }
+.fin-foot {
+  margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border);
+  color: var(--text-faint); font-size: .8rem; line-height: 1.7;
+}
+
 /* 空狀態 */
 .empty {
   border: 1px dashed var(--border-strong); border-radius: var(--radius);

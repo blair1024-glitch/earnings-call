@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import sys
 
+from fetch_financials import _num, _period, _prev_periods, _rates, evaluate
 from fetch_mops import _parse_tables, _roc_to_iso
 from fetch_news import _clean_title, _norm, _parse_rss, attach_to_calls
 from fetch_stocks import _pick
@@ -158,6 +159,63 @@ print("\n[OpenAPI 欄位挑選]")
 check("優先取公司簡稱", _pick({"公司簡稱": "台積電", "公司名稱": "台灣積體電路製造股份有限公司"},
                         ("公司簡稱", "公司名稱")), "台積電")
 check("找不到回空字串", _pick({"x": 1}, ("公司簡稱",)), "")
+
+
+# ---------------------------------------------------------------- 三率
+print("\n[數字與期別解析]")
+check("千分位逗號", _num("1,234,567"), 1234567.0)
+check("括號代表負數", _num("(1,234)"), -1234.0)
+check("空字串回 None（不能當成 0）", _num(""), None)
+check("非數字回 None", _num("不適用"), None)
+check("民國年季別", _period("115", "2"), "2026Q2")
+check("西元年季別", _period("2026", "2"), "2026Q2")
+check("季別不合法", _period("2026", "5"), "")
+check("上一季跨年", _prev_periods("2026Q1"), ("2025Q1", "2025Q4"))
+check("上一季同年", _prev_periods("2026Q3"), ("2025Q3", "2026Q2"))
+
+print("\n[三率計算]")
+check("三率百分比", _rates({"revenue": 1000.0, "gross": 560.0, "op": 450.0, "net": 410.0}),
+      {"gm": 56.0, "opm": 45.0, "npm": 41.0})
+check("缺營業毛利 → None（金融保險業）",
+      _rates({"revenue": 1000.0, "gross": None, "op": 450.0, "net": 410.0}), None)
+check("營收為 0 → None", _rates({"revenue": 0, "gross": 1, "op": 1, "net": 1}), None)
+
+print("\n[三率三升判斷]")
+hist = {
+    # 三個都比去年同季高 → 三率三升
+    "2330": {
+        "2025Q2": {"revenue": 1000.0, "gross": 500.0, "op": 400.0, "net": 360.0},
+        "2026Q2": {"revenue": 1200.0, "gross": 660.0, "op": 540.0, "net": 480.0},
+    },
+    # 毛利率升、營益率升、淨利率降 → 三率二升
+    "2454": {
+        "2025Q2": {"revenue": 1000.0, "gross": 480.0, "op": 300.0, "net": 280.0},
+        "2026Q2": {"revenue": 1000.0, "gross": 500.0, "op": 320.0, "net": 260.0},
+    },
+    # 只有上一季可比 → 應標成 QoQ
+    "3231": {
+        "2026Q1": {"revenue": 1000.0, "gross": 100.0, "op": 60.0, "net": 50.0},
+        "2026Q2": {"revenue": 1000.0, "gross": 120.0, "op": 70.0, "net": 55.0},
+    },
+    # 金融業，沒有營業毛利 → 不適用
+    "2881": {
+        "2026Q2": {"revenue": 1000.0, "gross": None, "op": 400.0, "net": 380.0},
+    },
+    # 只有一季，沒有基期
+    "6669": {
+        "2026Q2": {"revenue": 1000.0, "gross": 200.0, "op": 100.0, "net": 90.0},
+    },
+}
+ev = evaluate(hist)
+check("2330 判為三率三升", ev["2330"]["verdict"], "三率三升")
+check("2330 基期是去年同季", (ev["2330"]["basis"], ev["2330"]["basePeriod"]), ("YoY", "2025Q2"))
+check("2454 判為三率二升", ev["2454"]["verdict"], "三率二升")
+check("2454 淨利率是下降的", ev["2454"]["delta"]["npm"] < 0, True)
+check("3231 退回 QoQ 並標示", (ev["3231"]["basis"], ev["3231"]["basePeriod"]), ("QoQ", "2026Q1"))
+check("2881 標為不適用", ev["2881"]["applicable"], False)
+check_true("2881 有講原因", bool(ev["2881"].get("reason")), str(ev["2881"]))
+check("6669 沒有基期就不給 verdict", "verdict" in ev["6669"], False)
+check_true("6669 仍給得出當季三率", ev["6669"]["rates"]["gm"] == 20.0, str(ev["6669"]))
 
 
 # ---------------------------------------------------------------- 結果
