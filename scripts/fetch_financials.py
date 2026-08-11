@@ -51,8 +51,16 @@ F_SEASON = ("季別", "Season", "季度")
 F_REVENUE = ("營業收入", "收入", "營業收入合計")
 F_GROSS = ("營業毛利(毛損)", "營業毛利（毛損）", "營業毛利(毛損)淨額", "營業毛利")
 F_OP = ("營業利益(損失)", "營業利益（損失）", "營業利益")
-F_NET_PARENT = ("母公司業主(淨利/損)", "母公司業主（淨利／損）", "歸屬於母公司業主(淨利/損)")
-F_NET = ("本期淨利(淨損)", "本期淨利（淨損）", "本期淨利")
+# 實測 OpenAPI 的欄位名是「淨利（損）歸屬於母公司業主」這種語序，而且用全形括號，
+# 跟一般直覺寫法差很多，所以候選列得寬一點。
+F_NET_PARENT = (
+    "淨利（損）歸屬於母公司業主",
+    "淨利（淨損）歸屬於母公司業主",
+    "淨利(損)歸屬於母公司業主",
+    "母公司業主（淨利／損）",
+    "母公司業主(淨利/損)",
+)
+F_NET = ("本期淨利（淨損）", "本期淨利(淨損)", "本期稅後淨利（淨損）", "本期淨利")
 
 
 def _pick(row: dict, keys: tuple[str, ...]) -> str:
@@ -116,13 +124,18 @@ def fetch_snapshots(s) -> dict[str, dict]:
             revenue = _num(_pick(row, F_REVENUE))
             if not code or not period or not revenue:
                 continue
+            # 淨利率優先用「歸屬母公司業主」的淨利（法人看的是這個，不含非控制權益）；
+            # 沒有這欄才退回本期淨利。注意要用 is None 判斷，淨利剛好是 0 也算有值。
+            net = _num(_pick(row, F_NET_PARENT))
+            if net is None:
+                net = _num(_pick(row, F_NET))
             out[code] = {
                 "period": period,
                 "revenue": revenue,
                 # 金融／保險業沒有營業毛利 → 這裡會是 None，後面判成「不適用」
                 "gross": _num(_pick(row, F_GROSS)),
                 "op": _num(_pick(row, F_OP)),
-                "net": _num(_pick(row, F_NET_PARENT)) or _num(_pick(row, F_NET)),
+                "net": net,
             }
             got += 1
         log(f"  {url.rsplit('/', 1)[-1]} → {got} 筆")

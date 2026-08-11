@@ -14,17 +14,23 @@ from __future__ import annotations
 import re
 import sys
 from typing import Iterator
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
 from common import get, log, probe, recent_months, roc_year, session, warn
 
+# 順序有意義：實測 mops.twse.com.tw 對 GitHub runner 會回一頁
+# 「因為安全性考量，您所執行的頁面無法呈現」的擋人頁（HTTP 仍是 200），
+# 只有 mopsov 這個海外站台拿得到真資料，所以 mopsov 要排第一。
 HOSTS = [
     "https://mopsov.twse.com.tw",
     "https://mops.twse.com.tw",
 ]
 PATH = "/mops/web/ajax_t100sb02_1"
+
+# 上面那個擋人頁的特徵字串 —— 它是 200，不看內容會誤判成「這個月沒場次」
+BLOCKED_MARKERS = ("因為安全性考量", "FOR SECURITY REASONS")
 
 MARKETS = ["sii", "otc"]   # 上市、上櫃（市場別已經記在 data/stocks.js，場次不再重複存）
 
@@ -70,10 +76,15 @@ def _cell_link(td, base: str) -> str | None:
     if not a:
         return None
     href = a["href"].strip()
-    if not href or href.lower().startswith("javascript"):
+    if not href or href in ("#", "/") or href.lower().startswith("javascript"):
         # MOPS 有些連結是 javascript 觸發表單送出，抓不到直接網址就放棄這格
         return None
-    return urljoin(base, href)
+    url = urljoin(base, href)
+    # href="#" 這類會被 urljoin 併成「只有網域、沒有路徑」的網址，
+    # 實測就出現過 deck 變成 'https://mopsov.twse.com.tw' 這種沒用的值。
+    if not urlparse(url).path.strip("/"):
+        return None
+    return url
 
 
 def _parse_tables(html: str, base: str) -> Iterator[dict]:
@@ -136,6 +147,9 @@ def _fetch_month(s, market: str, year: int, month: int) -> list[dict]:
         if r is None:
             continue
         r.encoding = r.apparent_encoding or "utf-8"
+        if any(mark in r.text for mark in BLOCKED_MARKERS):
+            warn(f"{host} 回了擋人頁（HTTP 200 但內容是安全性拒絕），換下一個 host")
+            continue
         rows = list(_parse_tables(r.text, host))
         if rows:
             return rows

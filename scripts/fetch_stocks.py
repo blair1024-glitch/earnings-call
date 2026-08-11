@@ -67,8 +67,12 @@ def _from_openapi(s, urls: list[str], market: str) -> dict[str, list[str]]:
 
 
 def _from_isin(s, mode: int, market: str) -> dict[str, list[str]]:
-    """退路：解析 ISIN 對照表 HTML。第一欄是「代號　名稱」。"""
-    r = get(s, ISIN_URL.format(mode=mode))
+    """退路：解析 ISIN 對照表 HTML。第一欄是「代號　名稱」。
+
+    這個站很慢（實測上市那份 7.7MB 下載了 5 分 41 秒，不是逾時，就是純粹慢），
+    所以只在 OpenAPI 掛掉時才走這裡，而且不重試，免得把整個 job 拖垮。
+    """
+    r = get(s, ISIN_URL.format(mode=mode), timeout=420, retries=1)
     if r is None:
         return {}
     r.encoding = "big5-hkscs"
@@ -114,7 +118,9 @@ if __name__ == "__main__":
     if "--probe" in sys.argv:
         probe(s, TWSE_CANDIDATES, label="TWSE 上市公司基本資料")
         probe(s, TPEX_CANDIDATES, label="TPEx 上櫃公司基本資料")
-        probe(s, [ISIN_URL.format(mode=2), ISIN_URL.format(mode=4)], label="ISIN 對照表（退路）")
+        # ISIN 退路刻意不放進探測：它慢到會讓整個 probe 多花 8 分鐘，
+        # 而且只有在上面兩個 OpenAPI 都掛掉時才會用到。
+        log("\n（ISIN 退路太慢，不列入例行探測；需要時單獨測）")
     else:
         result = fetch_stocks(s)
         log(f"取得 {len(result)} 檔，前 5 筆：{list(result.items())[:5]}")

@@ -10,7 +10,11 @@ from __future__ import annotations
 
 import sys
 
-from fetch_financials import _num, _period, _prev_periods, _rates, evaluate
+from fetch_financials import (
+    F_GROSS, F_NET_PARENT, F_OP, F_REVENUE, F_SEASON, F_YEAR,
+    _num, _period, _prev_periods, _rates, evaluate,
+)
+from fetch_financials import _pick as _pick_fin
 from fetch_mops import _parse_tables, _roc_to_iso
 from fetch_news import _clean_title, _norm, _parse_rss, attach_to_calls
 from fetch_stocks import _pick
@@ -79,6 +83,18 @@ if len(rows) == 2:
     check("javascript: 連結視為沒有", r0["video"], None)
     check("第二列代號", r1["code"], "2454")
     check("沒有簡報時為 None", r1["deck"], None)
+
+print("\n[MOPS 表格：href=# 不該變成有效連結]")
+# 實測 log 裡出現過 deck 被解析成 'https://mopsov.twse.com.tw'（只有網域沒有路徑），
+# 原因是那格的連結是 href="#" 靠 javascript 送出表單。
+HASH_HTML = """
+<table>
+  <tr><th>公司代號</th><th>公司名稱</th><th>日期</th><th>中文簡報</th></tr>
+  <tr><td>1432</td><td>大魯閣</td><td>115/07/02</td><td><a href="#">中文</a></td></tr>
+</table>
+"""
+hash_rows = list(_parse_tables(HASH_HTML, "https://mopsov.twse.com.tw"))
+check("href=# 視為沒有簡報", hash_rows[0]["deck"], None)
 
 print("\n[MOPS 表格：不相干的表格要被忽略]")
 noise = "<table><tr><th>項目</th><th>數值</th></tr><tr><td>a</td><td>1</td></tr></table>"
@@ -172,6 +188,36 @@ check("西元年季別", _period("2026", "2"), "2026Q2")
 check("季別不合法", _period("2026", "5"), "")
 check("上一季跨年", _prev_periods("2026Q1"), ("2025Q1", "2025Q4"))
 check("上一季同年", _prev_periods("2026Q3"), ("2025Q3", "2026Q2"))
+
+print("\n[損益表欄位名 —— 用 probe 抓回來的真實欄位鎖住]")
+# 這一筆的欄位名是從 openapi.twse.com.tw/v1/opendata/t187ap06_L_ci 的實際回應複製來的，
+# 注意括號是全形（），而且母公司淨利的語序是「淨利（損）歸屬於母公司業主」。
+REAL_ROW = {
+    "出表日期": "1150811", "年度": "115", "季別": "2",
+    "公司代號": "1213", "公司名稱": "大飲",
+    "營業收入": "150587.00", "營業成本": "153262.00",
+    "營業毛利（毛損）": "-2675.00", "營業毛利（毛損）淨額": "-2675.00",
+    "營業費用": "20313.00", "營業利益（損失）": "-22988.00",
+    "本期淨利（淨損）": "-31570.00",
+    "淨利（損）歸屬於母公司業主": "-30000.00",
+}
+check("抓得到營收", _num(_pick_fin(REAL_ROW, F_REVENUE)), 150587.0)
+check("抓得到全形括號的營業毛利", _num(_pick_fin(REAL_ROW, F_GROSS)), -2675.0)
+check("抓得到全形括號的營業利益", _num(_pick_fin(REAL_ROW, F_OP)), -22988.0)
+check("優先抓歸屬母公司的淨利", _num(_pick_fin(REAL_ROW, F_NET_PARENT)), -30000.0)
+check("期別解析自年度與季別",
+      _period(_pick_fin(REAL_ROW, F_YEAR), _pick_fin(REAL_ROW, F_SEASON)), "2026Q2")
+
+# TPEx 用英文欄位名
+TPEX_ROW = {"Year": "115", "Season": "2", "SecuritiesCompanyCode": "1259",
+            "營業收入": "3091195.00", "營業毛利（毛損）": "717423.00",
+            "營業利益（損失）": "6249.00"}
+check("TPEx 的英文年度季別也認得",
+      _period(_pick_fin(TPEX_ROW, F_YEAR), _pick_fin(TPEX_ROW, F_SEASON)), "2026Q2")
+
+# 金融業那幾支端點實測回的是「每個欄位都空字串」的一列
+EMPTY_ROW = {"出表日期": "1150811", "年度": "", "季別": "", "公司代號": "", "營業收入": ""}
+check("空白列不會被誤收", _num(_pick_fin(EMPTY_ROW, F_REVENUE)), None)
 
 print("\n[三率計算]")
 check("三率百分比", _rates({"revenue": 1000.0, "gross": 560.0, "op": 450.0, "net": 410.0}),
