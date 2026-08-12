@@ -88,6 +88,14 @@ GitHub Pages 會 gzip，實際傳輸約 410KB。嫌大就把 `data/config.json` 
 
 ## 🔭 未來方向（AI 摘要）
 
+> **目前是關閉的**（`data/config.json` 的 `fetchSummaries: false`）。
+> 這個功能要 Anthropic Console 的 API 金鑰，而那是跟 Claude 訂閱分開計費的服務。
+> 程式碼、測試、前端渲染全部都在，**要開只需要兩步**：
+> 設好 `ANTHROPIC_API_KEY` secret，然後把 `fetchSummaries` 改回 `true`。
+>
+> 關著的時候網站其他部分完全正常 —— 場次、相關報導、財報三率、官方簡報連結照舊，
+> 只是不會出現「🔭 未來方向」那張卡。想自己補重點可以用 `data/notes.json`。
+
 法說會的價值在**前瞻指引** —— 財報講的是已經發生的事，法說會講的是下一季要幹嘛。
 所以每一場都會有一塊「未來方向」，用條列講這家公司接下來的展望、目標與時程。
 
@@ -152,10 +160,14 @@ GitHub Pages 會 gzip，實際傳輸約 410KB。嫌大就把 `data/config.json` 
 用 `claude-opus-5`，每場約 600 in / 300 out token，換算下來一場不到 NT$0.5。
 另外 `config.json` 的 `maxSummaryCalls` 是硬上限，程式出錯也燒不掉錢。
 
-### 要設定的東西（只有一件）
+### 之後想開的話
 
-**Settings → Secrets and variables → Actions → New repository secret**，
-名稱填 `ANTHROPIC_API_KEY`，**值填金鑰本身**（`sk-ant-` 開頭的那一長串）。
+1. 到 **https://console.anthropic.com** → Settings → API keys → Create Key，
+   複製那把 `sk-ant-` 開頭的金鑰（**只會顯示一次**）。
+   Console 是**跟 Claude 訂閱分開計費**的服務，要先儲值（最低約 US$5）
+2. **Settings → Secrets and variables → Actions → New repository secret**，
+   名稱填 `ANTHROPIC_API_KEY`，**值填金鑰本身**
+3. `data/config.json` 的 `fetchSummaries` 改回 `true`
 
 > ⚠️ 2026-08-12 連兩次執行都是 `401 invalid x-api-key` —— secret 的**值**被填成了
 > 「ANTHROPIC_API_KEY」這串字。名稱和值是兩個欄位，別填反了。
@@ -273,7 +285,7 @@ Q2 申報期限是 8/14，這幾天資料應該會變多；由於本專案每天
 | `months` | 往回抓幾個月的法說會場次。數字越大，`earnings.js` 越大、抓取越久 |
 | `fetchNews` | 設成 `false` 就只抓官方場次，完全不碰新聞來源 |
 | `fetchFinancials` | 設成 `false` 就不抓損益表，網站不顯示「財報體質」區塊 |
-| `fetchSummaries` | 設成 `false` 就不呼叫 Claude。沒設 `ANTHROPIC_API_KEY` 時也會自動跳過 |
+| `fetchSummaries` | 「未來方向」摘要開關。**目前是 `false`**。改成 `true` 前要先設好 `ANTHROPIC_API_KEY` secret |
 | `maxSummaryCalls` | 單次執行最多呼叫幾次 API 的硬上限。超過就優先做最新的場次，其餘下次再做 |
 | `searchUrl` | 查無資料時的外連樣板，`{q}` 會被代換成「公司名稱 法說會」 |
 

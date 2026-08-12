@@ -21,8 +21,8 @@
   "_fetchFinancials": "設成 false 就不抓損益表，網站不顯示「財報體質」區塊",
   "fetchFinancials": true,
 
-  "_fetchSummaries": "設成 false 就不呼叫 Claude 產生「未來方向」摘要。沒設定 ANTHROPIC_API_KEY 時也會自動跳過，不影響其他部分。",
-  "fetchSummaries": true,
+  "_fetchSummaries": "設成 false 就不呼叫 Claude 產生「未來方向」摘要。改回 true 並在 repo 設好 ANTHROPIC_API_KEY secret 就會開始產生，程式碼都還在。",
+  "fetchSummaries": false,
 
   "_maxSummaryCalls": "單次執行最多呼叫幾次 API 的硬上限，防止程式出錯時燒錢。超過就優先做日期最新的場次，其餘下次再做。",
   "maxSummaryCalls": 200,
