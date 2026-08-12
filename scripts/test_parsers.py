@@ -18,7 +18,9 @@ from fetch_financials import _migrate
 from fetch_financials import _pick as _pick_fin
 from fetch_financials import _pick_prefix as _prefix
 from fetch_mops import _parse_tables, _roc_to_iso, deck_filename, deck_url
-from fetch_news import _clean_title, _norm, _parse_rss, attach_to_calls, query_name
+from fetch_news import (
+    _clean_title, _norm, _parse_rss, attach_to_calls, query_name, title_matches,
+)
 from fetch_stocks import _pick
 from summarize import (
     fingerprint, needs_summary, normalize, numbers_in, to_browser, verify_outlook,
@@ -375,6 +377,26 @@ check("-KY 會拿掉", query_name("世芯-KY"), "世芯")
 check("中租-KY", query_name("中租-KY"), "中租")
 check("一般名稱不動", query_name("台積電"), "台積電")
 check("不會把名字砍成空字串", query_name("-KY"), "-KY")
+
+print("\n[報導標題要真的提到這家公司]")
+# 實測廣達 2026-08-13 那一場掛到的六則沒有一則跟廣達有關，
+# 因為 Google News 會回一堆「同一天也開法說會」的別家公司。
+check("標題有公司名 → 收",
+      title_matches("台積電", "2330", "台積電法說會／第3季營收有望破1.4兆元"), True)
+check("別家公司的法說會 → 丟",
+      title_matches("廣達", "2382", "長興明天法說會 投信押寶已連13買"), False)
+check("盤前大盤新聞 → 丟",
+      title_matches("廣達", "2382", "8月12日盤前／財報營收報喜 台積電與 SONY 合資"), False)
+check("標題寫代號也算",
+      title_matches("瑞昱", "2379", "【即時新聞】瑞昱(2379)法說後急跌逾5%"), True)
+check("簡稱比新聞寫法長也要收（日月光投控 → 日月光）",
+      title_matches("日月光投控", "3711", "〈日月光法說〉Q2純益達210億元"), True)
+check("中華資安不算中華電",
+      title_matches("中華電", "2412", "中華資安法說會／AI 驅動營運穩定成長"), False)
+check("國巨的星號不影響比對",
+      title_matches("國巨*", "2327", "國巨法說會／不考慮買庫藏股"), True)
+check("短名稱不會被前綴規則放寬",
+      title_matches("統一", "1216", "統一法說／2026年上半年EPS達2.56元"), True)
 
 
 # ---------------------------------------------------------------- 未來方向摘要

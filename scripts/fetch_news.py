@@ -89,6 +89,26 @@ def query_name(name: str) -> str:
     return n or (name or "").strip()
 
 
+def title_matches(name: str, code: str, title: str) -> bool:
+    """標題有沒有真的提到這家公司。
+
+    Google News 用「公司名 法說會」查回來的結果，有一大半只是**同一天也開法說會**
+    的別家公司。實測廣達 2026-08-13 那一場掛到的六則裡，沒有一則跟廣達有關
+    （長興、台積電＋SONY、Lumentum…），25 檔裡有 11 檔是這種情況。
+    只靠「標題有沒有法說／財報字眼」擋不住，還要求標題點名這家公司。
+    """
+    t = title or ""
+    if code and code in t:          # 標題常寫成「瑞昱(2379)」
+        return True
+    n = query_name(name)
+    if not n:
+        return False
+    if n in t:
+        return True
+    # 交易所簡稱常常比新聞寫法長：簡稱是「日月光投控」，標題寫的是「日月光法說」
+    return len(n) >= 4 and n[:3] in t
+
+
 def _norm(title: str) -> str:
     return re.sub(r"[\s　,，。、!！?？「」【】\[\]()（）-]+", "", title)
 
@@ -149,12 +169,16 @@ def fetch_news(s, targets: dict[str, str], *, pause: float = 1.0) -> dict[str, l
         ]
         _merge(bucket, hits)
 
-        items = sorted(bucket.values(), key=lambda x: x["date"], reverse=True)
+        raw = list(bucket.values())
+        items = [it for it in raw if title_matches(name, code, it.get("title", ""))]
+        items.sort(key=lambda x: x["date"], reverse=True)
         for it in items:
             it.pop("direct", None)
         if items:
             result[code] = items
-        log(f"  {code} {name} → {len(items)} 則")
+        dropped = len(raw) - len(items)
+        log(f"  {code} {name} → {len(items)} 則"
+            + (f"（另有 {dropped} 則標題沒提到這家公司，已濾掉）" if dropped else ""))
 
     log(f"📦 新聞：{len(result)} 檔有報導、合計 {sum(len(v) for v in result.values())} 則")
     return result
