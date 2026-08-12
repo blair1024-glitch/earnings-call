@@ -8,4 +8,4 @@
  * 產生後有經過程式驗證：條目裡出現的數字，一定要在輸入原文中找得到，
  * 否則整條丟掉（見 scripts/summarize.py 的 verify_outlook）。
  */
-window.SUMMARIES = {"updated":"2026-08-12 13:10 +08:00","items":{}};
+window.SUMMARIES = {"updated":"2026-08-12 13:31 +08:00","items":{}};
