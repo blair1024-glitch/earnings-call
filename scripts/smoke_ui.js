@@ -149,16 +149,83 @@ function check(name, cond, extra) {
     check('沒有財報資料時整個區塊隱藏', await page.locator('#fin-block').isHidden());
   }
 
-  // ---------- 11. 響應式 ----------
-  console.log('\n[11] 響應式');
+  // ---------- 11. 未來方向（AI 摘要） ----------
+  // 摘要要花錢才產得出來，repo 裡不放假資料。所以這裡注入一份合成的
+  // window.SUMMARIES 再重新渲染，測的是「渲染邏輯」而不是「資料內容」。
+  console.log('\n[11] 未來方向（AI 摘要）');
+  const target = await page.evaluate(() => {
+    const calls = window.EARNINGS.calls || {};
+    for (const code of window.EARNINGS.featured || []) {
+      const first = (calls[code] || [])[0];
+      if (first && (first.news || []).length >= 2) return { code, date: first.date };
+    }
+    return null;
+  });
+
+  if (target) {
+    await page.goto(BASE + '?stock=' + target.code, { waitUntil: 'networkidle' });
+    const injected = await page.evaluate(t => {
+      window.SUMMARIES = {
+        updated: 'test',
+        items: {
+          [t.code]: {
+            [t.date]: {
+              confidence: 'high',
+              outlook: [
+                { text: '下一季產能利用率預期回升', tag: '下季展望', src: 0 },
+                { text: '新製程明年進入量產', tag: '新產品', src: 1 },
+              ],
+            },
+          },
+        },
+      };
+      document.getElementById('call-select').dispatchEvent(new Event('change'));
+      const call = window.EARNINGS.calls[t.code][0];
+      return { url0: call.news[0].url, url1: call.news[1].url };
+    }, target);
+
+    check('有摘要時卡片出現', await page.locator('#outlook-card').isVisible());
+    check('條目數量正確', (await page.locator('#outlook-card .outlook li').count()) === 2);
+    check('條目文字有出來',
+      (await text('#outlook-card .outlook li:first-child .outlook-text')) === '下一季產能利用率預期回升');
+    check('有分類標籤',
+      (await text('#outlook-card .outlook li:first-child .outlook-tag')) === '下季展望');
+    check('第 1 條連回 news[0]',
+      (await page.locator('#outlook-card .outlook-src').first().getAttribute('href')) === injected.url0);
+    check('第 2 條連回 news[1]',
+      (await page.locator('#outlook-card .outlook-src').nth(1).getAttribute('href')) === injected.url1);
+    check('來源連結開新分頁且有 noopener',
+      (await page.locator('#outlook-card .outlook-src').first().getAttribute('rel')) === 'noopener noreferrer');
+    check('有標明是 AI 整理', (await text('#outlook-card .ai-badge')).includes('AI'));
+    check('有免責說明', /不是公司原文/.test(await text('#outlook-card .ai-disclaimer')));
+    check('排在相關報導前面', await page.evaluate(() => {
+      const card = document.getElementById('outlook-card');
+      const news = document.querySelector('.newslist');
+      return !!card && !!news &&
+        (card.compareDocumentPosition(news) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    }));
+
+    // 沒有摘要的場次 → 整張卡不該存在
+    await page.evaluate(() => {
+      window.SUMMARIES = { items: {} };
+      document.getElementById('call-select').dispatchEvent(new Event('change'));
+    });
+    check('沒有摘要時整張卡不顯示', (await page.locator('#outlook-card').count()) === 0);
+    check('摘要渲染沒有 JS 錯誤', errors.length === 0, errors.join(' | '));
+  } else {
+    console.log('  （資料裡找不到有 2 則以上報導的場次，跳過）');
+  }
+
+  // ---------- 12. 響應式 ----------
+  console.log('\n[12] 響應式');
   await page.setViewportSize({ width: 360, height: 740 });
   await page.goto(BASE, { waitUntil: 'networkidle' });
   const overflow = await page.evaluate(() =>
     document.documentElement.scrollWidth - document.documentElement.clientWidth);
   check('360px 寬不橫向捲動', overflow <= 0, 'overflow=' + overflow);
 
-  // ---------- 12. 零外部請求 ----------
-  console.log('\n[12] 零外部請求');
+  // ---------- 13. 零外部請求 ----------
+  console.log('\n[13] 零外部請求');
   const external = requests.filter(u => !u.startsWith(BASE) && !u.startsWith('data:'));
   check('沒有任何外部請求', external.length === 0, external.slice(0, 3).join(', '));
 

@@ -200,9 +200,78 @@ def fetch_mops(s, months: int = 24) -> dict[str, list[dict]]:
     return out
 
 
+def probe_deck(s, *, rows: int = 6) -> None:
+    """把「簡報」那一格的原始 HTML 印出來，看看官方 PDF 到底構不構得出直連。
+
+    背景：實測 9740 場的 deck 全是 None —— MOPS 的簡報連結是 `href="#"` 加 JS 送出
+    表單，`_cell_link()` 正確地把它擋掉了。但檔案本身通常還是存在於某個可預測的
+    路徑上，而答案就在我們已經抓下來的 HTML 裡（`onclick` 的內容、表單的 hidden
+    欄位），不需要用猜的。
+
+    這個模式只印東西、不改任何解析邏輯，也不寫檔。
+    """
+    log("\n=== PROBE: 法說會簡報連結的實際結構 ===")
+    for year, month in recent_months(2):
+        for host in HOSTS:
+            payload = {
+                "encodeURIComponent": "1", "step": "1", "firstin": "1", "off": "1",
+                "TYPEK": "sii", "year": str(roc_year(year)), "month": f"{month:02d}",
+            }
+            r = get(s, host + PATH, method="POST", data=payload, retries=1)
+            if r is None:
+                continue
+            r.encoding = r.apparent_encoding or "utf-8"
+            if any(mark in r.text for mark in BLOCKED_MARKERS):
+                warn(f"{host} 回擋人頁，換下一個")
+                continue
+
+            soup = BeautifulSoup(r.text, "html.parser")
+
+            # 頁面上的表單有哪些欄位 —— JS 送出時就是改這些值
+            for i, form in enumerate(soup.find_all("form")):
+                names = [(inp.get("name"), inp.get("value")) for inp in form.find_all("input")]
+                log(f"  form[{i}] action={form.get('action')!r} method={form.get('method')!r}")
+                log(f"           inputs={names[:20]}")
+
+            shown = 0
+            for table in soup.find_all("table"):
+                trs = table.find_all("tr")
+                if len(trs) < 2:
+                    continue
+                for tr in trs[1:]:
+                    tds = tr.find_all("td")
+                    if len(tds) < 3:
+                        continue
+                    for td in tds:
+                        a = td.find("a")
+                        if not a:
+                            continue
+                        # 只看「不是普通超連結」的那種格子，普通的已經抓得到了
+                        if a.get("href") not in (None, "", "#") and not str(
+                                a.get("href")).lower().startswith("javascript"):
+                            continue
+                        log(f"  ↳ 格子原始 HTML：{str(td)[:400]}")
+                        log(f"     a.attrs = {dict(a.attrs)}")
+                        shown += 1
+                        break
+                    if shown >= rows:
+                        break
+                if shown >= rows:
+                    break
+
+            if shown == 0:
+                log(f"  {host} {year}/{month:02d}：沒有找到 JS 型態的連結格")
+            else:
+                log(f"  {host} {year}/{month:02d}：印了 {shown} 格")
+            return   # 拿到一個能用的 host 就夠了
+    warn("probe-deck：所有 host 都拿不到資料")
+
+
 if __name__ == "__main__":
     s = session()
-    if "--probe" in sys.argv:
+    if "--probe-deck" in sys.argv:
+        probe_deck(s)
+    elif "--probe" in sys.argv:
         probe(s, [h + PATH for h in HOSTS], label="MOPS 法人說明會端點（GET 探測）")
         log("\n=== PROBE: MOPS POST 實際查詢 ===")
         for year, month in recent_months(2):

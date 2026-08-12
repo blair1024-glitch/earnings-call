@@ -98,6 +98,15 @@ def write_js(filename: str, varname: str, payload: Any, header: str) -> None:
     log(f"✍️  已寫出 {path}（{os.path.getsize(path):,} bytes）")
 
 
+def write_json(filename: str, payload: Any) -> None:
+    """寫 data/ 底下由程式維護的 JSON（快取／歷史用，同樣不縮排）。"""
+    path = os.path.join(DATA_DIR, filename)
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, separators=(",", ":"), sort_keys=False)
+    log(f"🗄️  已寫出 {path}（{os.path.getsize(path):,} bytes）")
+
+
 def read_json(filename: str, default: Any) -> Any:
     """讀 data/ 底下的手動維護 JSON（缺檔或格式壞掉都回 default，不中斷 build）。"""
     path = os.path.join(DATA_DIR, filename)

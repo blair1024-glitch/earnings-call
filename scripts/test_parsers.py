@@ -18,8 +18,11 @@ from fetch_financials import _migrate
 from fetch_financials import _pick as _pick_fin
 from fetch_financials import _pick_prefix as _prefix
 from fetch_mops import _parse_tables, _roc_to_iso
-from fetch_news import _clean_title, _norm, _parse_rss, attach_to_calls
+from fetch_news import _clean_title, _norm, _parse_rss, attach_to_calls, query_name
 from fetch_stocks import _pick
+from summarize import (
+    fingerprint, needs_summary, normalize, numbers_in, to_browser, verify_outlook,
+)
 
 FAILED: list[str] = []
 
@@ -316,6 +319,110 @@ check("2881 標為不適用", ev["2881"]["applicable"], False)
 check_true("2881 有講原因", bool(ev["2881"].get("reason")), str(ev["2881"]))
 check("6669 沒有基期就不給 verdict", "verdict" in ev["6669"], False)
 check_true("6669 仍給得出當季三率", ev["6669"]["rates"]["gm"] == 20.0, str(ev["6669"]))
+
+
+# ---------------------------------------------------------------- 查詢用公司名
+print("\n[查詢用公司名]")
+check("星號註記會拿掉", query_name("國巨*"), "國巨")
+check("-KY 會拿掉", query_name("世芯-KY"), "世芯")
+check("中租-KY", query_name("中租-KY"), "中租")
+check("一般名稱不動", query_name("台積電"), "台積電")
+check("不會把名字砍成空字串", query_name("-KY"), "-KY")
+
+
+# ---------------------------------------------------------------- 未來方向摘要
+# 這一段守的是「模型回來之後的防幻覺驗證」。不連網、不需要 API key，
+# 直接餵合成的模型輸出進 verify_outlook()。
+print("\n[未來方向摘要：數字驗證]")
+
+SUM_SUMMARY = "公司營運簡介、財務業務資訊、未來展望"
+SUM_NEWS = [
+    {"title": "聯發科法說2》估Q3營收年增7％至12％上看1598億元 第2代AI ASIC預計2028年初量產",
+     "date": "2026-07-30", "source": "經濟日報", "url": "https://money.udn.com/news/story/1"},
+    {"title": "聯發科法說會：旗艦晶片需求穩健 全年毛利率目標維持48.5%",
+     "date": "2026-07-30", "source": "經濟日報", "url": "https://money.udn.com/news/story/2"},
+]
+
+
+def bullets(*items):
+    return [{"text": t, "tag": g, "src": s} for t, g, s in items]
+
+
+check("全形數字與千分位正規化", normalize("１,５９８ 億元"), "1598億元")
+check("抓得出標題裡的數字", numbers_in("估Q3營收年增7％至12％"), ["3", "7", "12"])
+
+kept = verify_outlook(
+    bullets(("Q3 營收預估年增 7%～12%，上看 1,598 億元", "下季展望", 0),
+            ("第 2 代 AI ASIC 預計 2028 年初量產", "新產品", 0)),
+    SUM_NEWS, SUM_SUMMARY)
+check("有根據的條目全部留下", len(kept), 2)
+check("千分位寫法也對得上", kept[0]["text"].startswith("Q3 營收預估"), True)
+
+check("編出來的數字被擋掉",
+      verify_outlook(bullets(("Q3 營收上看 1600 億元", "下季展望", 0)), SUM_NEWS, SUM_SUMMARY),
+      [])
+check("四捨五入寫法可放行",
+      len(verify_outlook(bullets(("全年毛利率目標 48.5%", "全年目標", 1)), SUM_NEWS, SUM_SUMMARY)), 1)
+check("改成別的百分比就被擋掉",
+      verify_outlook(bullets(("全年毛利率目標 49%", "全年目標", 1)), SUM_NEWS, SUM_SUMMARY), [])
+
+check("src 超出報導數量 → 丟掉",
+      verify_outlook(bullets(("需求穩健", "營運策略", 5)), SUM_NEWS, SUM_SUMMARY), [])
+check("src 是 True（bool 不算 int）→ 丟掉",
+      verify_outlook([{"text": "需求穩健", "tag": "營運策略", "src": True}], SUM_NEWS, SUM_SUMMARY), [])
+check("src 缺漏 → 丟掉",
+      verify_outlook([{"text": "需求穩健", "tag": "營運策略"}], SUM_NEWS, SUM_SUMMARY), [])
+check("超長條目 → 丟掉",
+      verify_outlook(bullets(("需求穩健" * 20, "營運策略", 0)), SUM_NEWS, SUM_SUMMARY), [])
+check("不認得的 tag 會被歸到營運策略",
+      verify_outlook(bullets(("需求穩健", "亂寫的標籤", 1)), SUM_NEWS, SUM_SUMMARY)[0]["tag"],
+      "營運策略")
+check("條目數量有上限",
+      len(verify_outlook(bullets(*[("需求穩健", "營運策略", 1)] * 9), SUM_NEWS, SUM_SUMMARY)), 5)
+check("全部被擋掉就回空清單（這場不產生摘要）",
+      verify_outlook(bullets(("Q4 營收上看 9999 億元", "下季展望", 0)), SUM_NEWS, SUM_SUMMARY), [])
+
+
+print("\n[未來方向摘要：指紋與呼叫條件]")
+import datetime as _dt
+
+TODAY = _dt.date(2026, 8, 12)
+CALL = {"date": "2026-07-30", "summary": SUM_SUMMARY, "news": SUM_NEWS}
+
+fp = fingerprint("2454", "2026-07-30", SUM_SUMMARY, SUM_NEWS)
+check("同樣輸入 → 同樣指紋",
+      fingerprint("2454", "2026-07-30", SUM_SUMMARY, SUM_NEWS), fp)
+check_true("多掛一則報導 → 指紋改變",
+           fingerprint("2454", "2026-07-30", SUM_SUMMARY,
+                       SUM_NEWS + [{"title": "新的一則", "date": "2026-08-01"}]) != fp)
+
+check("指紋沒變就不重打 API",
+      needs_summary(CALL, {"2454|2026-07-30": {"fp": fp}}, "2454", today=TODAY), False)
+check("指紋變了就要重打",
+      needs_summary(CALL, {"2454|2026-07-30": {"fp": "舊的"}}, "2454", today=TODAY), True)
+check("沒摘要過的場次要打", needs_summary(CALL, {}, "2454", today=TODAY), True)
+check("只有一則報導 → 不值得打",
+      needs_summary({**CALL, "news": SUM_NEWS[:1]}, {}, "2454", today=TODAY), False)
+check("太舊的場次 → 不打",
+      needs_summary({**CALL, "date": "2023-01-05"}, {}, "2454", today=TODAY), False)
+check("日期壞掉 → 不打",
+      needs_summary({**CALL, "date": ""}, {}, "2454", today=TODAY), False)
+
+
+print("\n[未來方向摘要：輸出給前端]")
+CACHE = {
+    "_說明": "這一列不是場次，不可以被當成資料",
+    "2454|2026-07-30": {"fp": fp, "outlook": bullets(("需求穩健", "營運策略", 1)),
+                        "confidence": "high"},
+    "2454|2026-04-30": {"fp": "x", "outlook": [], "confidence": "low"},
+    "9999|2026-07-30": {"fp": "x", "outlook": bullets(("不存在的公司", "營運策略", 0)),
+                        "confidence": "high"},
+}
+BROWSER = to_browser({"2454": [{"date": "2026-07-30"}, {"date": "2026-04-30"}]}, CACHE)
+check("只輸出有摘要的場次", sorted(BROWSER.get("2454", {}).keys()), ["2026-07-30"])
+check("outlook 空的場次不輸出", "2026-04-30" in BROWSER.get("2454", {}), False)
+check("cache 裡對不到場次的公司不會外洩", "9999" in BROWSER, False)
+check("說明列不會被當成場次", "_說明" in BROWSER, False)
 
 
 # ---------------------------------------------------------------- 結果

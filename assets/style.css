@@ -279,6 +279,37 @@ a:hover { text-decoration: underline; }
   margin-top: 2px;
 }
 
+/* ---- 未來方向（AI 依報導標題整理） ---- */
+.ai-badge {
+  font-size: .68rem; font-weight: 700; letter-spacing: .02em;
+  border-radius: 999px; padding: 1px 8px;
+  background: var(--accent-soft); color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.outlook { display: grid; gap: 8px; }
+.outlook li {
+  background: var(--bg-sunken); border: 1px solid var(--border);
+  border-left: 3px solid color-mix(in srgb, var(--accent) 55%, var(--border));
+  border-radius: var(--radius-sm); padding: 10px 12px;
+  display: flex; flex-wrap: wrap; gap: 4px 12px;
+  align-items: baseline; justify-content: space-between;
+}
+.outlook-text { font-size: .95rem; font-weight: 600; line-height: 1.5; }
+.outlook-meta { display: flex; align-items: center; gap: 8px; flex: none; }
+.outlook-tag {
+  font-size: .72rem; border-radius: 999px; padding: 1px 8px;
+  border: 1px solid var(--border-strong); color: var(--text-muted);
+  white-space: nowrap;
+}
+.outlook-src { font-size: .76rem; color: var(--text-muted); white-space: nowrap; }
+.outlook-src:hover { color: var(--accent); }
+
+.ai-disclaimer {
+  margin-top: 12px; font-size: .8rem; line-height: 1.65;
+  color: var(--text-faint);
+}
+
 /* 相關報導 */
 .newslist { display: grid; gap: 2px; }
 .newslist li { padding: 9px 0; border-bottom: 1px solid var(--border); }

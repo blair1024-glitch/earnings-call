@@ -78,6 +78,17 @@ def _parse_rss(xml_text: str) -> list[dict]:
     return out
 
 
+def query_name(name: str) -> str:
+    """把交易所簡稱整理成適合下關鍵字的樣子。
+
+    「國巨*」的星號、「中租-KY」的 -KY 都是交易所的註記，新聞標題不會這樣寫。
+    -KY 只在後面還有字時才留（避免把「世芯-KY」砍成空字串）。
+    """
+    n = (name or "").strip().rstrip("*＊ ")
+    n = re.sub(r"[-－]KY$", "", n).strip()
+    return n or (name or "").strip()
+
+
 def _norm(title: str) -> str:
     return re.sub(r"[\s　,，。、!！?？「」【】\[\]()（）-]+", "", title)
 
@@ -113,6 +124,9 @@ def fetch_news(s, targets: dict[str, str], *, pause: float = 1.0) -> dict[str, l
 
     for code, name in targets.items():
         bucket: dict[str, dict] = {}
+        # 交易所簡稱帶的註記符號（國巨* 的星號代表財報有保留意見、-KY 是註冊地）
+        # 不會出現在新聞標題裡，拿去查只會查不到東西。
+        name = query_name(name)
 
         # 1) Google News，限定經濟日報
         q1 = quote(f'{name} 法說會 site:money.udn.com')

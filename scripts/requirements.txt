@@ -1,2 +1,4 @@
 requests>=2.31
 beautifulsoup4>=4.12
+# 只有「未來方向」摘要會用到。沒設 ANTHROPIC_API_KEY 的話裝了也不會被呼叫。
+anthropic>=0.40

@@ -47,9 +47,17 @@ jobs:
           python scripts/fetch_mops.py --probe
           python scripts/fetch_news.py --probe
           python scripts/fetch_financials.py --probe
+          python scripts/summarize.py --probe
+          # 官方簡報 PDF 目前 0/9740 場拿得到（連結都是 JS 表單送出）。
+          # 這一步只把那格的原始 HTML 印出來，看看直連構不構得出來，不改解析邏輯。
+          python scripts/fetch_mops.py --probe-deck
 
       - name: 產生資料檔
         if: ${{ !inputs.probe }}
+        env:
+          # 沒設定這個 secret 的話，「未來方向」摘要會自動跳過，
+          # 其餘資料照常更新，build 不會失敗。
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python scripts/build.py
 
       - name: 提交變更
@@ -57,7 +65,8 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/stocks.js data/earnings.js data/financials.js data/financial_history.json
+          git add data/stocks.js data/earnings.js data/financials.js \
+                  data/financial_history.json data/summaries.js data/summaries.json
           if git diff --staged --quiet; then
             echo "資料沒有變化，不做 commit"
           else

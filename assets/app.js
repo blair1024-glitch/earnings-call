@@ -286,6 +286,43 @@
     return out.join("");
   }
 
+  // ---- 渲染：未來方向（AI 依報導標題整理） ---------------------------------
+  // 刻意每次都重讀 window.SUMMARIES，而不是在頂端存成變數：
+  // 這樣 scripts/smoke_ui.js 可以注入一份合成資料再重新渲染，
+  // 不必為了測畫面而把假摘要寫進 repo。
+  function outlookFor(code, date) {
+    var root = window.SUMMARIES;
+    var items = (root && root.items) || {};
+    var byDate = items[code];
+    var entry = byDate && date ? byDate[date] : null;
+    return (entry && entry.outlook) || [];
+  }
+
+  function outlookMarkup(outlook, news) {
+    var parts = ['<div class="card" id="outlook-card">'];
+    parts.push('<div class="section-title">🔭 未來方向 ' +
+               '<span class="ai-badge" title="由 AI 整理，非公司原文">AI 整理</span></div>');
+    parts.push('<ul class="outlook">');
+    for (var i = 0; i < outlook.length; i++) {
+      var b = outlook[i];
+      var src = news[b.src];
+      parts.push("<li>" +
+        '<span class="outlook-text">' + esc(b.text) + "</span>" +
+        '<span class="outlook-meta">' +
+          (b.tag ? '<span class="outlook-tag">' + esc(b.tag) + "</span>" : "") +
+          (src ? '<a class="outlook-src" href="' + esc(src.url) +
+                 '" target="_blank" rel="noopener noreferrer" title="' + esc(src.title) + '">' +
+                 esc(src.source || "來源") + " ↗</a>" : "") +
+        "</span></li>");
+    }
+    parts.push("</ul>");
+    parts.push('<p class="ai-disclaimer">ⓘ 這幾條是由 AI 依據下方<strong>報導標題</strong>與公開資訊觀測站的' +
+               '擇要訊息整理的，<strong>不是公司原文</strong>，也不構成投資建議。' +
+               '每一條都附了出處連結，請以原始報導與公司正式公告為準。</p>');
+    parts.push("</div>");
+    return parts.join("");
+  }
+
   // ---- 渲染：單一場次 ------------------------------------------------------
   function renderCall(code, call) {
     var body = el("call-body");
@@ -330,6 +367,13 @@
     }
     parts.push("</div>");
 
+    // 未來方向（AI 整理）—— 法說會看的就是這個，所以排在最前面
+    var news = call.news || [];
+    var outlook = outlookFor(code, call.date);
+    if (outlook.length) {
+      parts.push(outlookMarkup(outlook, news));
+    }
+
     // 人工補充的重點
     var notes = call.notes || [];
     if (notes.length) {
@@ -341,7 +385,6 @@
     }
 
     // 相關報導（經濟日報優先）
-    var news = call.news || [];
     parts.push('<div class="card">');
     parts.push('<div class="section-title">📰 相關報導 <span class="count">' +
                esc(news.length) + " 則</span></div>");
