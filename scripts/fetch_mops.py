@@ -14,9 +14,11 @@ from __future__ import annotations
 import re
 import sys
 from typing import Iterator
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlencode, urljoin, urlparse
 
 from bs4 import BeautifulSoup
+
+import requests
 
 from common import get, log, probe, recent_months, roc_year, session, warn
 
@@ -33,6 +35,24 @@ PATH = "/mops/web/ajax_t100sb02_1"
 BLOCKED_MARKERS = ("因為安全性考量", "FOR SECURITY REASONS")
 
 MARKETS = ["sii", "otc"]   # 上市、上櫃（市場別已經記在 data/stocks.js，場次不再重複存）
+
+# ---- 官方簡報的下載連結 ----------------------------------------------------
+# 簡報那一格長這樣（--probe-deck 從真實回應挖出來的）：
+#
+#   <a href="#" onclick='document.fm_fileDownload.fileName.value="121620260810M001.pdf";
+#                        document.fm_fileDownload.submit();'>121620260810M001.pdf</a>
+#
+# 而頁面上的 fm_fileDownload 表單是：
+#
+#   action='/server-java/FileDownLoad' method='post'
+#   inputs=[('step','9'), ('filePath','/home/html/nas/STR/'),
+#           ('fileName',''), ('functionName','t100sb02_1')]
+#
+# 也就是說檔名就寫在 onclick 裡（代號＋日期＋序號），其餘參數全是固定值。
+# 之前 deck 之所以 0/9740 都抓不到，是因為只看 href（那是 "#"）。
+DECK_PATH = "/server-java/FileDownLoad"
+DECK_PARAMS = {"step": "9", "filePath": "/home/html/nas/STR/", "functionName": "t100sb02_1"}
+_DECK_FILE_RE = re.compile(r"fileName\.value\s*=\s*[\"']([^\"']+)[\"']")
 
 # 表頭關鍵字 → 內部欄位名（依序比對，先中者為準）
 HEADER_MAP: list[tuple[tuple[str, ...], str]] = [
@@ -69,6 +89,26 @@ def _classify(header: str) -> str | None:
         if any(k in h for k in keys):
             return field
     return None
+
+
+def deck_filename(td) -> str | None:
+    """從 onclick 裡挖出簡報檔名。抓不到就回 None。"""
+    a = td.find("a")
+    if not a:
+        return None
+    m = _DECK_FILE_RE.search(a.get("onclick") or "")
+    if not m:
+        return None
+    name = m.group(1).strip()
+    # 只收看起來像檔名的東西，免得端點改版後塞一堆垃圾進資料檔
+    return name if re.fullmatch(r"[\w.\-]+\.(pdf|pptx?|docx?)", name, re.I) else None
+
+
+def deck_url(host: str, filename: str) -> str:
+    """把檔名組成可以直接點的下載網址。"""
+    params = dict(DECK_PARAMS)
+    params["fileName"] = filename
+    return host + DECK_PATH + "?" + urlencode(params)
 
 
 def _cell_link(td, base: str) -> str | None:
@@ -122,7 +162,14 @@ def _parse_tables(html: str, base: str) -> Iterator[dict]:
                 field = cols.get(j)
                 if not field:
                     continue
-                if field in ("deck", "deck_en", "video"):
+                if field in ("deck", "deck_en"):
+                    # 先看有沒有真的 href；沒有就從 onclick 挖檔名（絕大多數是這種）
+                    rec[field] = _cell_link(td, base)
+                    if rec[field] is None:
+                        fn = deck_filename(td)
+                        if fn:
+                            rec[field] = deck_url(base, fn)
+                elif field == "video":
                     rec[field] = _cell_link(td, base)
                 else:
                     rec[field] = td.get_text(strip=True)
@@ -157,6 +204,34 @@ def _fetch_month(s, market: str, year: int, month: int) -> list[dict]:
         if "代號" not in r.text:
             warn(f"{url}（{market} {year}/{month:02d}）回應裡找不到表格，端點可能已變更")
     return []
+
+
+def verify_deck(s, url: str) -> bool:
+    """實際下載一次，確認組出來的簡報網址真的會吐檔案而不是一頁 HTML。
+
+    寧可整批不放連結，也不要在網站上放一堆點下去是錯誤頁的「官方簡報」按鈕。
+    只讀前面一小段就好，不用把整份 PDF 拉下來。
+    """
+    try:
+        r = s.get(url, timeout=30, stream=True)
+    except requests.RequestException as e:
+        warn("簡報連結驗證失敗（%s: %s）" % (type(e).__name__, e))
+        return False
+    try:
+        if r.status_code != 200:
+            warn("簡報連結驗證失敗（HTTP %d）：%s" % (r.status_code, url))
+            return False
+        ctype = (r.headers.get("content-type") or "").lower()
+        disp = (r.headers.get("content-disposition") or "").lower()
+        head = next(r.iter_content(1024), b"") or b""
+        ok = ("html" not in ctype) or ("attachment" in disp) or head[:4] == b"%PDF"
+        if not ok:
+            warn("簡報連結回的是網頁而不是檔案（content-type=%s）：%s" % (ctype, url))
+        else:
+            log("📄 簡報連結驗證通過（content-type=%s）" % ctype)
+        return ok
+    finally:
+        r.close()
 
 
 def fetch_mops(s, months: int = 24) -> dict[str, list[dict]]:
@@ -196,7 +271,19 @@ def fetch_mops(s, months: int = 24) -> dict[str, list[dict]]:
     for code, calls in by_code.items():
         out[code] = sorted(calls.values(), key=lambda c: c["date"], reverse=True)
 
-    log(f"📦 MOPS 法說會：{len(out)} 家公司、{sum(len(v) for v in out.values())} 場")
+    # 簡報網址是我們自己從 onclick 的檔名組出來的，不是頁面上現成的連結，
+    # 所以先實際抓一份驗證。過不了就整批拿掉 —— 網站上寧可沒有這個按鈕，
+    # 也不要放一堆點下去是錯誤頁的「官方簡報」。
+    decks = [c["deck"] for v in out.values() for c in v if c.get("deck")]
+    if decks and not verify_deck(s, decks[0]):
+        warn(f"簡報連結沒通過驗證 → 這次不輸出 deck（本來有 {len(decks)} 場）")
+        for v in out.values():
+            for c in v:
+                c["deck"] = None
+        decks = []
+
+    log(f"📦 MOPS 法說會：{len(out)} 家公司、"
+        f"{sum(len(v) for v in out.values())} 場、{len(decks)} 場有官方簡報")
     return out
 
 

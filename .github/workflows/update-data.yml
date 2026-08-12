@@ -42,6 +42,10 @@ jobs:
       # 探測模式：把各來源的實際回應印到 log，用來確認端點有沒有又改掉
       - name: 探測來源端點
         if: inputs.probe
+        env:
+          # probe 也要帶，否則 summarize --probe 永遠只會說「未設定」，
+          # 那就完全失去診斷意義了。
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           python scripts/fetch_stocks.py --probe
           python scripts/fetch_mops.py --probe

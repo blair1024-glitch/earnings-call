@@ -17,7 +17,7 @@ from fetch_financials import (
 from fetch_financials import _migrate
 from fetch_financials import _pick as _pick_fin
 from fetch_financials import _pick_prefix as _prefix
-from fetch_mops import _parse_tables, _roc_to_iso
+from fetch_mops import _parse_tables, _roc_to_iso, deck_filename, deck_url
 from fetch_news import _clean_title, _norm, _parse_rss, attach_to_calls, query_name
 from fetch_stocks import _pick
 from summarize import (
@@ -321,6 +321,36 @@ check("6669 沒有基期就不給 verdict", "verdict" in ev["6669"], False)
 check_true("6669 仍給得出當季三率", ev["6669"]["rates"]["gm"] == 20.0, str(ev["6669"]))
 
 
+# ---------------------------------------------------------------- 官方簡報連結
+# 這些 HTML 是 2026-08-12 的 --probe-deck 從 MOPS 真實回應抓下來的，
+# 一個字都沒改。之前 deck 之所以 0/9740 全空，就是因為只看 href（那是 "#"）。
+print("\n[官方簡報連結]")
+from bs4 import BeautifulSoup as _BS
+
+def _td(html):
+    return _BS(html, "html.parser").find("td")
+
+DECK_TD = _td('<td style="text-align:left !important;"><a href="#" onclick=\''
+              'document.fm_fileDownload.fileName.value="121620260810M001.pdf";'
+              'document.fm_fileDownload.submit();\'><font color="blue"><u>'
+              '121620260810M001.pdf</u></font></a></td>')
+PPTX_TD = _td('<td><a href="#" onclick=\'document.fm_fileDownload.fileName.value='
+              '"132120260811M001.pptx";document.fm_fileDownload.submit();\'>x</a></td>')
+
+check("從 onclick 挖出 PDF 檔名", deck_filename(DECK_TD), "121620260810M001.pdf")
+check("pptx 也收", deck_filename(PPTX_TD), "132120260811M001.pptx")
+check("沒有 onclick 就回 None", deck_filename(_td('<td><a href="#">x</a></td>')), None)
+check("沒有連結就回 None", deck_filename(_td("<td>無</td>")), None)
+check("不像檔名的值會被擋掉",
+      deck_filename(_td('<td><a onclick=\'document.fm_fileDownload.fileName.value='
+                        '"../../etc/passwd";\'>x</a></td>')), None)
+check("組出來的下載網址",
+      deck_url("https://mopsov.twse.com.tw", "121620260810M001.pdf"),
+      "https://mopsov.twse.com.tw/server-java/FileDownLoad"
+      "?step=9&filePath=%2Fhome%2Fhtml%2Fnas%2FSTR%2F&functionName=t100sb02_1"
+      "&fileName=121620260810M001.pdf")
+
+
 # ---------------------------------------------------------------- 查詢用公司名
 print("\n[查詢用公司名]")
 check("星號註記會拿掉", query_name("國巨*"), "國巨")
@@ -407,6 +437,56 @@ check("太舊的場次 → 不打",
       needs_summary({**CALL, "date": "2023-01-05"}, {}, "2454", today=TODAY), False)
 check("日期壞掉 → 不打",
       needs_summary({**CALL, "date": ""}, {}, "2454", today=TODAY), False)
+
+
+print("\n[未來方向摘要：失敗不可以污染快取]")
+# 2026-08-12 第一次正式執行踩到的坑：API key 無效，200 場全部 401，
+# 但每一場都被記成「材料不足」寫進快取 —— 指紋一記下去，key 修好之後
+# 那 200 場也永遠不會重試了。這裡守的就是這件事。
+import summarize as _sum
+
+
+class _Boom:
+    """模擬一個永遠 401 的 client。"""
+    class messages:
+        @staticmethod
+        def create(**kw):
+            raise _sum.__dict__.setdefault("_FakeAuthError", type(
+                "AuthenticationError", (Exception,), {}))("invalid x-api-key")
+
+
+CALLS = {"2454": [dict(CALL)]}
+poisoned = {}
+_orig_client = _sum._client
+try:
+    _sum._client = lambda: _Boom()
+    _sum.summarize(CALLS, {"2454": "聯發科"}, poisoned)
+finally:
+    _sum._client = _orig_client
+check("呼叫失敗的場次不寫進快取", poisoned, {})
+check("下次執行會重新嘗試", needs_summary(CALL, poisoned, "2454", today=TODAY), True)
+
+
+class _Empty:
+    """模擬呼叫成功、但材料撐不出東西。"""
+    class messages:
+        @staticmethod
+        def create(**kw):
+            class R:
+                content = [type("B", (), {"type": "text",
+                                          "text": '{"outlook":[],"confidence":"low"}'})()]
+            return R()
+
+
+thin = {}
+try:
+    _sum._client = lambda: _Empty()
+    _sum.summarize({"2454": [dict(CALL)]}, {"2454": "聯發科"}, thin)
+finally:
+    _sum._client = _orig_client
+check("材料不足的場次會記快取（免得天天重打）", list(thin.keys()), ["2454|2026-07-30"])
+check("記的是空 outlook", thin["2454|2026-07-30"]["outlook"], [])
+check("材料沒變就不再打", needs_summary(CALL, thin, "2454", today=TODAY), False)
 
 
 print("\n[未來方向摘要：輸出給前端]")

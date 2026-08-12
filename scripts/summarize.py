@@ -226,8 +226,18 @@ def _client():
     return anthropic.Anthropic(api_key=key)
 
 
-def _ask(client, name: str, code: str, call: dict) -> dict | None:
-    """打一次 API，回傳已驗證的結果；任何失敗都回 None（不中斷整體）。"""
+def _ask(client, name: str, code: str, call: dict) -> tuple[str, dict | None]:
+    """打一次 API。回傳 (狀態, 結果)，狀態是三種之一：
+
+      "ok"    —— 有通過驗證的條目，結果放在第二個值
+      "empty" —— 呼叫成功，但材料撐不出東西（模型說 low、或條目全被驗證擋下）
+      "error" —— 呼叫本身失敗（401、逾時、額度用完…）
+
+    區分 empty 與 error 很重要：**只有 empty 可以寫進快取**。
+    error 若被當成 empty 記下指紋，那一場之後就永遠不會重試了 ——
+    2026-08-12 的第一次正式執行就是這樣，API key 無效導致 200 場全部
+    以 401 失敗，卻全被記成「材料不足」寫進快取。
+    """
     try:
         resp = client.messages.create(
             model=MODEL,
@@ -240,14 +250,19 @@ def _ask(client, name: str, code: str, call: dict) -> dict | None:
         data = json.loads(text)
     except Exception as e:                     # noqa: BLE001 — 任何失敗都只是略過這一場
         warn("%s %s 摘要失敗：%s: %s" % (code, call.get("date"), type(e).__name__, e))
-        return None
+        return "error", {"err": type(e).__name__}
 
     if data.get("confidence") == "low":
-        return None
+        return "empty", None
     kept = verify_outlook(data.get("outlook"), call.get("news") or [], call.get("summary", ""))
     if not kept:
-        return None
-    return {"outlook": kept, "confidence": data.get("confidence") or "medium"}
+        return "empty", None
+    return "ok", {"outlook": kept, "confidence": data.get("confidence") or "medium"}
+
+
+def _fatal(exc_name: str) -> bool:
+    """這種錯誤重試幾次都一樣，應該整批中止而不是把配額打完。"""
+    return exc_name in ("AuthenticationError", "PermissionDeniedError", "NotFoundError")
 
 
 def summarize(
@@ -284,19 +299,34 @@ def summarize(
         return cache
 
     log("🔭 未來方向摘要：%d 場要處理（model=%s）" % (len(todo), MODEL))
-    ok = skipped = 0
+    ok = empty = failed = 0
     stamp = now_taipei().date().isoformat()
 
-    for code, call in todo:
+    for i, (code, call) in enumerate(todo):
         date = call.get("date") or ""
-        result = _ask(client, names.get(code, ""), code, call)
+        status, result = _ask(client, names.get(code, ""), code, call)
         key = code + "|" + date
         fp = fingerprint(code, date, call.get("summary", ""), call.get("news") or [])
-        if result is None:
-            skipped += 1
-            # 記下指紋，避免同一批材料每天重打一次 API
-            cache[key] = {"fp": fp, "model": MODEL, "at": stamp, "outlook": [], "confidence": "low"}
+
+        if status == "error":
+            failed += 1
+            # ★ 刻意不寫進快取 —— 寫了就等於記下「這批材料試過了」，
+            #   之後永遠不會重試。失敗的場次下次執行會自動再試一次。
+            if _fatal((result or {}).get("err", "")):
+                warn("這是設定層級的錯誤（%s），重試沒有意義，"
+                     "剩下 %d 場全部中止。請確認 ANTHROPIC_API_KEY 的**值**"
+                     "是不是真的 API key（sk-ant- 開頭）。"
+                     % (result.get("err"), len(todo) - i - 1))
+                break
             continue
+
+        if status == "empty":
+            empty += 1
+            # 材料真的撐不出東西 —— 這個可以記，免得同一批標題天天重打
+            cache[key] = {"fp": fp, "model": MODEL, "at": stamp,
+                          "outlook": [], "confidence": "low"}
+            continue
+
         cache[key] = {
             "fp": fp,
             "model": MODEL,
@@ -306,7 +336,8 @@ def summarize(
         }
         ok += 1
 
-    log("🔭 完成：%d 場有摘要、%d 場材料不足或沒通過驗證" % (ok, skipped))
+    log("🔭 完成：%d 場有摘要、%d 場材料不足或沒通過驗證、%d 場呼叫失敗（下次會重試）"
+        % (ok, empty, failed))
     return cache
 
 
@@ -324,15 +355,43 @@ def to_browser(calls: dict[str, list[dict]], cache: dict) -> dict:
     return out
 
 
+def probe_key() -> None:
+    """檢查 key 設定，並實際打一次最小的請求確認它是有效的。
+
+    不印任何 key 的內容 —— 只印長度與「開頭是不是 sk-ant-」。
+    （順帶一提：如果 log 裡這段的欄位名稱被 GitHub 遮成 ***，
+    代表 secret 的**值**剛好等於那個字串，也就是把名稱貼到值的欄位去了。
+    2026-08-12 第一次執行就是這樣，200 場全部 401。）
+    """
+    log("=== PROBE: 摘要設定 ===")
+    log("  model = %s" % MODEL)
+
+    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not key:
+        warn("  金鑰未設定（這一步的 workflow env 有帶 secret，所以是真的沒設）")
+        return
+    log("  金鑰長度 = %d，sk-ant- 開頭 = %s" % (len(key), key.startswith("sk-ant-")))
+    if not key.startswith("sk-ant-"):
+        warn("  ⚠️ 值看起來不像 API key。請確認貼進 secret 的是金鑰本身，不是名稱。")
+
+    try:
+        import anthropic
+        log("  anthropic 套件 = %s" % getattr(anthropic, "__version__", "?"))
+    except ImportError:
+        warn("  anthropic 套件 = 未安裝")
+        return
+
+    # 實際打一次 1 token 的請求，這是唯一能確定 key 有效的方法（成本 ≈ 0）
+    try:
+        anthropic.Anthropic(api_key=key).messages.create(
+            model=MODEL, max_tokens=1, messages=[{"role": "user", "content": "hi"}])
+        log("  ✅ 實際呼叫成功，金鑰有效")
+    except Exception as e:                     # noqa: BLE001
+        warn("  ❌ 實際呼叫失敗：%s: %s" % (type(e).__name__, e))
+
+
 if __name__ == "__main__":
     if "--probe" in sys.argv:
-        log("=== PROBE: 摘要設定 ===")
-        log("  model = %s" % MODEL)
-        log("  ANTHROPIC_API_KEY = %s" % ("有設定" if os.environ.get("ANTHROPIC_API_KEY") else "未設定"))
-        try:
-            import anthropic
-            log("  anthropic 套件 = %s" % getattr(anthropic, "__version__", "?"))
-        except ImportError:
-            log("  anthropic 套件 = 未安裝")
+        probe_key()
     else:
         log("這支腳本由 scripts/build.py 呼叫。單獨執行請加 --probe。")
