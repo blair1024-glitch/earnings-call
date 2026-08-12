@@ -162,17 +162,22 @@ def _parse_tables(html: str, base: str) -> Iterator[dict]:
                 field = cols.get(j)
                 if not field:
                     continue
-                if field in ("deck", "deck_en"):
-                    # 先看有沒有真的 href；沒有就從 onclick 挖檔名（絕大多數是這種）
-                    rec[field] = _cell_link(td, base)
-                    if rec[field] is None:
-                        fn = deck_filename(td)
-                        if fn:
-                            rec[field] = deck_url(base, fn)
-                elif field == "video":
+                if field in ("deck", "deck_en", "video"):
                     rec[field] = _cell_link(td, base)
                 else:
                     rec[field] = td.get_text(strip=True)
+
+            # 簡報檔名不靠表頭關鍵字去找。實測那一欄的表頭對不到
+            # 「中文」「簡報」任何一個，結果 deck 整批是空的。
+            # 改成整列掃：哪一格的 onclick 有 fm_fileDownload.fileName，那格就是簡報。
+            # 這個特徵夠獨特，不會誤判成別的欄位。
+            if not rec.get("deck"):
+                for td in tds:
+                    fn = deck_filename(td)
+                    if fn:
+                        rec["deck"] = fn
+                        break
+
             code = (rec.get("code") or "").strip()
             if re.fullmatch(r"\d{4,6}[A-Z]?", code):
                 yield rec
@@ -206,36 +211,54 @@ def _fetch_month(s, market: str, year: int, month: int) -> list[dict]:
     return []
 
 
-def verify_deck(s, url: str) -> bool:
-    """實際下載一次，確認組出來的簡報網址真的會吐檔案而不是一頁 HTML。
-
-    寧可整批不放連結，也不要在網站上放一堆點下去是錯誤頁的「官方簡報」按鈕。
-    只讀前面一小段就好，不用把整份 PDF 拉下來。
-    """
-    try:
-        r = s.get(url, timeout=30, stream=True)
-    except requests.RequestException as e:
-        warn("簡報連結驗證失敗（%s: %s）" % (type(e).__name__, e))
+def _is_file_response(r) -> bool:
+    """回應到底是檔案還是一頁 HTML？"""
+    if r.status_code != 200:
         return False
-    try:
-        if r.status_code != 200:
-            warn("簡報連結驗證失敗（HTTP %d）：%s" % (r.status_code, url))
-            return False
-        ctype = (r.headers.get("content-type") or "").lower()
-        disp = (r.headers.get("content-disposition") or "").lower()
-        head = next(r.iter_content(1024), b"") or b""
-        ok = ("html" not in ctype) or ("attachment" in disp) or head[:4] == b"%PDF"
-        if not ok:
-            warn("簡報連結回的是網頁而不是檔案（content-type=%s）：%s" % (ctype, url))
-        else:
-            log("📄 簡報連結驗證通過（content-type=%s）" % ctype)
-        return ok
-    finally:
-        r.close()
+    ctype = (r.headers.get("content-type") or "").lower()
+    disp = (r.headers.get("content-disposition") or "").lower()
+    head = next(r.iter_content(1024), b"") or b""
+    return ("attachment" in disp) or head[:4] == b"%PDF" or ("html" not in ctype and bool(head))
 
 
-def fetch_mops(s, months: int = 24) -> dict[str, list[dict]]:
-    """回傳 {代號: [場次, ...]}，場次已依日期新到舊排序。"""
+def verify_deck(s, host: str, filename: str) -> str | None:
+    """確認簡報檔到底怎麼拿得到。回傳 "get" / "post"，都不行就 None。
+
+    頁面上的 fm_fileDownload 表單是 POST，但這種下載端點通常 GET 也吃。
+    GET 能用的話前端就是一個單純的 <a>，簡單得多，所以先試 GET。
+    兩種都不行就整批不輸出 —— 寧可沒有這個按鈕，也不要放一堆點下去是錯誤頁的
+    「官方簡報」。
+    """
+    params = dict(DECK_PARAMS, fileName=filename)
+    url = host + DECK_PATH
+
+    for method in ("get", "post"):
+        try:
+            if method == "get":
+                r = s.get(url + "?" + urlencode(params), timeout=30, stream=True)
+            else:
+                r = s.post(url, data=params, timeout=30, stream=True)
+        except requests.RequestException as e:
+            warn("簡報連結 %s 驗證失敗（%s: %s）" % (method.upper(), type(e).__name__, e))
+            continue
+        try:
+            if _is_file_response(r):
+                log("📄 簡報連結驗證通過：%s（content-type=%s）"
+                    % (method.upper(), r.headers.get("content-type")))
+                return method
+            warn("簡報連結 %s 回的不是檔案（HTTP %d, content-type=%s）"
+                 % (method.upper(), r.status_code, r.headers.get("content-type")))
+        finally:
+            r.close()
+    return None
+
+
+def fetch_mops(s, months: int = 24) -> tuple[dict[str, list[dict]], dict | None]:
+    """回傳 ({代號: [場次, ...]}, 簡報下載設定)。場次已依日期新到舊排序。
+
+    場次裡的 `deck` 是**簡報檔名**（例如 121620260810M001.pdf），不是網址；
+    完整網址由前端用第二個回傳值組出來。
+    """
     by_code: dict[str, dict[str, dict]] = {}
     total = 0
 
@@ -271,20 +294,24 @@ def fetch_mops(s, months: int = 24) -> dict[str, list[dict]]:
     for code, calls in by_code.items():
         out[code] = sorted(calls.values(), key=lambda c: c["date"], reverse=True)
 
-    # 簡報網址是我們自己從 onclick 的檔名組出來的，不是頁面上現成的連結，
-    # 所以先實際抓一份驗證。過不了就整批拿掉 —— 網站上寧可沒有這個按鈕，
-    # 也不要放一堆點下去是錯誤頁的「官方簡報」。
+    # deck 存的是**檔名**，不是完整網址 —— 網址由前端依 meta 組出來，
+    # 這樣 9000 多場省下大量重複的固定參數，也能同時支援 GET 與 POST 兩種取法。
     decks = [c["deck"] for v in out.values() for c in v if c.get("deck")]
-    if decks and not verify_deck(s, decks[0]):
-        warn(f"簡報連結沒通過驗證 → 這次不輸出 deck（本來有 {len(decks)} 場）")
-        for v in out.values():
-            for c in v:
-                c["deck"] = None
-        decks = []
+    info: dict | None = None
+    if decks:
+        method = verify_deck(s, HOSTS[0], decks[0])
+        if method:
+            info = {"base": HOSTS[0] + DECK_PATH, "method": method, "params": DECK_PARAMS}
+        else:
+            warn(f"簡報連結兩種方法都沒通過驗證 → 這次不輸出 deck（本來有 {len(decks)} 場）")
+            for v in out.values():
+                for c in v:
+                    c["deck"] = None
+            decks = []
 
     log(f"📦 MOPS 法說會：{len(out)} 家公司、"
         f"{sum(len(v) for v in out.values())} 場、{len(decks)} 場有官方簡報")
-    return out
+    return out, info
 
 
 def probe_deck(s, *, rows: int = 6) -> None:
@@ -325,6 +352,12 @@ def probe_deck(s, *, rows: int = 6) -> None:
                 trs = table.find_all("tr")
                 if len(trs) < 2:
                     continue
+                # 表頭與它被分類成什麼 —— 簡報那欄第一版之所以整批空掉，
+                # 就是因為它的表頭對不到任何關鍵字，而當時 log 看不出來。
+                heads = [c.get_text(strip=True) for c in trs[0].find_all(["th", "td"])]
+                if any("代號" in h for h in heads):
+                    log("  表頭 = %s" % heads)
+                    log("  分類 = %s" % [(h, _classify(h)) for h in heads])
                 for tr in trs[1:]:
                     tds = tr.find_all("td")
                     if len(tds) < 3:
@@ -365,5 +398,5 @@ if __name__ == "__main__":
             rows = _fetch_month(s, "sii", year, month)
             log(f"  {year}/{month:02d} sii → {len(rows)} 列；首列 = {rows[0] if rows else None}")
     else:
-        result = fetch_mops(s, months=3)
-        log(f"取得 {len(result)} 家；2330 = {result.get('2330')}")
+        result, deck_info = fetch_mops(s, months=3)
+        log(f"取得 {len(result)} 家；簡報設定 = {deck_info}；2330 = {result.get('2330')}")

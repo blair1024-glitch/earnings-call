@@ -106,7 +106,7 @@ def main() -> int:
 
     # ---------- 2. 法說會場次 ----------
     log("\n── 2/5 MOPS 法說會場次 ──────────────────────")
-    calls = fetch_mops(s, months=int(cfg["months"]))
+    calls, deck_info = fetch_mops(s, months=int(cfg["months"]))
     if not calls:
         failures.append("法說會場次")
         warn("MOPS 抓取失敗 → 保留現有的 data/earnings.js 不覆蓋")
@@ -186,6 +186,10 @@ def main() -> int:
             "months": int(cfg["months"]),
             "searchUrl": cfg["searchUrl"],
             "mopsUrl": cfg["mopsUrl"],
+            # 場次的 deck 欄存的是簡報**檔名**，完整下載連結由前端用這個組出來。
+            # method 是 "get"（畫成一般連結）或 "post"（畫成送出表單的按鈕），
+            # 由 fetch_mops 實際下載驗證過才會有值。
+            "deck": deck_info,
             "sources": [
                 "公開資訊觀測站（法人說明會一覽表）",
                 "TWSE / TPEx OpenAPI（公司清單）",

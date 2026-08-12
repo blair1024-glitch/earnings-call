@@ -286,6 +286,38 @@
     return out.join("");
   }
 
+  // ---- 渲染：官方簡報下載 --------------------------------------------------
+  // call.deck 存的是**檔名**，不是網址 —— 9000 多場省下大量重複的固定參數。
+  // 完整連結用 META.deck 組出來；method 是抓取時實際下載驗證過的結果。
+  function deckMarkup(call) {
+    var cfg = META.deck;
+    if (!call.deck || !cfg || !cfg.base) return "";
+    var params = cfg.params || {};
+    var k, out;
+
+    if (cfg.method === "post") {
+      // 下載端點只吃 POST，所以畫成一個送出表單的按鈕。
+      // 表單只有按下去才會送出，頁面載入時一樣沒有任何外部請求。
+      out = ['<form class="deckform" method="post" target="_blank" action="' + esc(cfg.base) + '">'];
+      for (k in params) {
+        if (!Object.prototype.hasOwnProperty.call(params, k)) continue;
+        out.push('<input type="hidden" name="' + esc(k) + '" value="' + esc(params[k]) + '">');
+      }
+      out.push('<input type="hidden" name="fileName" value="' + esc(call.deck) + '">');
+      out.push('<button class="linkbtn primary" type="submit">📄 官方法說會簡報</button></form>');
+      return out.join("");
+    }
+
+    out = [];
+    for (k in params) {
+      if (!Object.prototype.hasOwnProperty.call(params, k)) continue;
+      out.push(encodeURIComponent(k) + "=" + encodeURIComponent(params[k]));
+    }
+    out.push("fileName=" + encodeURIComponent(call.deck));
+    return '<a class="linkbtn primary" href="' + esc(cfg.base + "?" + out.join("&")) +
+           '" target="_blank" rel="noopener noreferrer">📄 官方法說會簡報</a>';
+  }
+
   // ---- 渲染：未來方向（AI 依報導標題整理） ---------------------------------
   // 刻意每次都重讀 window.SUMMARIES，而不是在頂端存成變數：
   // 這樣 scripts/smoke_ui.js 可以注入一份合成資料再重新渲染，
@@ -348,11 +380,11 @@
     }
 
     // 官方簡報 / 影音
-    if (call.deck || call.video) {
+    var deck = deckMarkup(call);
+    if (deck || call.video) {
       parts.push('<div class="linkrow" style="margin-top:14px">');
-      if (call.deck) {
-        parts.push('<a class="linkbtn primary" href="' + esc(call.deck) +
-                   '" target="_blank" rel="noopener noreferrer">📄 官方法說會簡報</a>');
+      if (deck) {
+        parts.push(deck);
       }
       if (call.video) {
         parts.push('<a class="linkbtn" href="' + esc(call.video) +

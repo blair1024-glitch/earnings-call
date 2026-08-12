@@ -263,6 +263,9 @@ a:hover { text-decoration: underline; }
 }
 .linkbtn:hover { text-decoration: none; border-color: var(--accent); transform: translateY(-1px); }
 .linkbtn.primary { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); color: var(--accent); }
+/* 官方簡報有時候只能用 POST 拿，那就畫成送出表單的按鈕；外觀跟其他連結按鈕一樣 */
+.deckform { display: contents; }
+button.linkbtn { font: inherit; cursor: pointer; }
 
 /* 人工補充的重點 */
 .checklist { display: grid; gap: 8px; }

@@ -350,6 +350,23 @@ check("組出來的下載網址",
       "?step=9&filePath=%2Fhome%2Fhtml%2Fnas%2FSTR%2F&functionName=t100sb02_1"
       "&fileName=121620260810M001.pdf")
 
+# 第一版只在「表頭對到簡報欄」時才去挖 onclick，結果實測 deck 整批是空的 ——
+# 那一欄的表頭根本對不到「中文」或「簡報」。現在改成整列掃，不依賴表頭。
+DECK_TABLE = """
+<table>
+ <tr><th>公司代號</th><th>公司名稱</th><th>召開日期</th><th>擇要訊息</th><th>電子檔案</th></tr>
+ <tr><td>1216</td><td>統一</td><td>115/08/10</td><td>法說</td>
+     <td><a href="#" onclick='document.fm_fileDownload.fileName.value="121620260810M001.pdf";
+         document.fm_fileDownload.submit();'>121620260810M001.pdf</a></td></tr>
+ <tr><td>1321</td><td>大洋</td><td>115/08/11</td><td>法說</td><td>&nbsp;</td></tr>
+</table>
+"""
+rows = list(_parse_tables(DECK_TABLE, "https://mopsov.twse.com.tw"))
+check("表頭叫「電子檔案」也抓得到簡報", [r.get("deck") for r in rows],
+      ["121620260810M001.pdf", None])
+check("其他欄位照樣解析", [r["code"] for r in rows], ["1216", "1321"])
+check("deck 存的是檔名不是網址", rows[0]["deck"].startswith("http"), False)
+
 
 # ---------------------------------------------------------------- 查詢用公司名
 print("\n[查詢用公司名]")

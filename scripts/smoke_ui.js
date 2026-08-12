@@ -216,6 +216,66 @@ function check(name, cond, extra) {
     console.log('  （資料裡找不到有 2 則以上報導的場次，跳過）');
   }
 
+  // ---------- 11.5 官方簡報連結 ----------
+  // deck 存的是檔名，網址由前端依 META.deck 組。抓取端還沒驗出 GET/POST
+  // 哪個能用之前資料是空的，所以這裡一樣用注入的方式測兩條渲染路徑。
+  console.log('\n[11.5] 官方簡報連結');
+  if (target) {
+    const deckCheck = await page.evaluate(t => {
+      const call = window.EARNINGS.calls[t.code][0];
+      const orig = { deck: call.deck, meta: window.EARNINGS.meta.deck };
+      const render = () => document.getElementById('call-select').dispatchEvent(new Event('change'));
+
+      call.deck = '121620260810M001.pdf';
+
+      window.EARNINGS.meta.deck = {
+        base: 'https://mopsov.twse.com.tw/server-java/FileDownLoad',
+        method: 'get',
+        params: { step: '9', filePath: '/home/html/nas/STR/', functionName: 't100sb02_1' },
+      };
+      render();
+      const a = document.querySelector('.linkrow a.linkbtn.primary');
+      const getHref = a ? a.getAttribute('href') : null;
+
+      window.EARNINGS.meta.deck.method = 'post';
+      render();
+      const form = document.querySelector('form.deckform');
+      const post = form ? {
+        action: form.getAttribute('action'),
+        method: form.getAttribute('method'),
+        target: form.getAttribute('target'),
+        fileName: (form.querySelector('input[name=fileName]') || {}).value,
+        hidden: form.querySelectorAll('input[type=hidden]').length,
+        hasButton: !!form.querySelector('button.linkbtn'),
+      } : null;
+
+      window.EARNINGS.meta.deck = null;
+      render();
+      const none = document.querySelectorAll('.linkrow a.linkbtn.primary, form.deckform').length;
+
+      call.deck = orig.deck;
+      window.EARNINGS.meta.deck = orig.meta;
+      render();
+      return { getHref, post, none };
+    }, target);
+
+    check('GET 模式畫成一般連結',
+      (deckCheck.getHref || '').startsWith(
+        'https://mopsov.twse.com.tw/server-java/FileDownLoad?'), deckCheck.getHref);
+    check('GET 網址帶了檔名與固定參數',
+      /fileName=121620260810M001\.pdf/.test(deckCheck.getHref || '') &&
+      /functionName=t100sb02_1/.test(deckCheck.getHref || ''), deckCheck.getHref);
+    check('POST 模式畫成表單', !!deckCheck.post);
+    check('表單送到正確端點且開新分頁',
+      deckCheck.post && deckCheck.post.method === 'post' && deckCheck.post.target === '_blank' &&
+      deckCheck.post.action.endsWith('/server-java/FileDownLoad'), JSON.stringify(deckCheck.post));
+    check('表單帶齊 4 個欄位（3 固定 + 檔名）',
+      deckCheck.post && deckCheck.post.hidden === 4 &&
+      deckCheck.post.fileName === '121620260810M001.pdf', JSON.stringify(deckCheck.post));
+    check('沒有 meta.deck 時不畫任何簡報按鈕', deckCheck.none === 0, String(deckCheck.none));
+    check('簡報渲染沒有 JS 錯誤', errors.length === 0, errors.join(' | '));
+  }
+
   // ---------- 12. 響應式 ----------
   console.log('\n[12] 響應式');
   await page.setViewportSize({ width: 360, height: 740 });
